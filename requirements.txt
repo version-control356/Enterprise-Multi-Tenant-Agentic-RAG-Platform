@@ -1,0 +1,55 @@
+# Web Framework & API
+fastapi>=0.111.0,<0.112.0
+uvicorn[standard]>=0.30.0,<0.31.0
+pydantic>=2.7.0,<3.0.0
+pydantic-settings>=2.3.0,<3.0.0
+numpy>=1.26.0,<2.0.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+bcrypt>=4.0.1,<4.1.0
+python-multipart>=0.0.9
+
+# Data Stores & Clients
+asyncpg>=0.29.0
+psycopg[binary]>=3.1.19
+psycopg-pool>=3.2.0
+redis>=5.0.0
+qdrant-client>=1.12.0
+fastembed>=0.3.0
+
+# Document Parsers
+pypdf>=4.2.0
+python-docx>=1.1.0
+pandas>=2.2.0
+openpyxl>=3.1.0
+beautifulsoup4>=4.12.0
+langchain-text-splitters>=0.3.0,<0.4.0
+langchain-groq>=0.2.0,<0.3.0
+langchain-openai>=0.2.0,<0.3.0
+ragas>=0.2.15,<0.3.0
+
+# Agent & LLM Orchestration
+langchain-core>=0.3.0,<0.4.0
+langchain>=0.3.0,<0.4.0
+langchain-community>=0.3.0,<0.4.0
+langgraph>=0.2.20,<0.3.0
+langgraph-checkpoint-postgres>=2.0.0,<3.0.0
+groq>=0.9.0
+openai>=1.35.0
+httpx-sse>=0.4.0
+
+# UI
+streamlit>=1.36.0
+
+# Testing
+pytest>=8.0.0
+
+# Enterprise defensive AI integrations (enabled by configuration)
+presidio-analyzer>=2.2.354,<3.0.0
+presidio-anonymizer>=2.2.354,<3.0.0
+nemoguardrails>=0.11.0,<1.0.0
+onnxruntime==1.17.1
+pytest==8.2.0
+ruff==0.3.5
+bandit==1.7.9
+pip-audit==2.7.0

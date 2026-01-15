@@ -1,0 +1,123 @@
+# ==========================================
+# Multi-Tenant Agentic RAG Platform .gitignore
+# ==========================================
+
+# --- [AI Agent Instructions] ---
+# Internal engineering standards for VS Code Codex/Copilot/Cursor.
+# Hidden here to ensure they do not become public on GitHub.
+AGENTS.md
+
+# --- [Secrets, Credentials, & ENV] ---
+# Essential safety rule: Never commit real API keys or DB passwords.
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+credentials.json
+# (Add specific secret filenames used by GCP/AWS/Azure here if needed)
+
+# --- [Python - General] ---
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# --- [Python - Virtual Environments] ---
+# Local virtualenv folders must not be committed.
+venv/
+.venv/
+env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# --- [Development & IDE] ---
+# Local VS Code settings (e.g., launch configurations) are often user-specific.
+# Un-comment the line below if you want to commit shared VS Code extensions/settings.
+# .vscode/
+.vscode/launch.json
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+dev_notes.txt
+
+# --- [Local Data & Persistence] ---
+# Local SQLite database files (often used in early dev).
+*.sqlite
+*.db
+*.db-journal
+
+# Local persistence directories mapped from Docker.
+# These contain actual data (vector indexes, state checkpointers, cache).
+data/
+qdrant_data/
+postgres_data/
+redis_data/
+storage/
+media/
+backups/
+
+# --- [Testing & Observability] ---
+# Pytest reports and configuration caches.
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+remakers.xml
+.hypothesis/
+
+# Langfuse/Observability local telemetry artifacts
+.langfuse/
+.phoenix/
+
+# --- [Logs] ---
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pip-log.txt
+uvicorn.log
+gunicorn.log
+docker-compose.logs
+
+# --- [Docker] ---
+# If you create localized compose files during testing
+docker-compose.override.yml
+
+# --- [RAG/ML Artifacts] ---
+# Local models or downloaded data files.
+# Large models belong in infrastructure, not Git.
+models/
+huggingface/
+.cache/huggingface/
+tmp_data/
+processed_documents/
+raw_documents/
+
+# --- [Miscellaneous] ---
+# Streamlit-specific ignored files.
+.streamlit/credentials.toml
+.streamlit/config.toml
