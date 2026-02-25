@@ -1,0 +1,1 @@
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS allowed_roles TEXT NOT NULL DEFAULT 'admin';
