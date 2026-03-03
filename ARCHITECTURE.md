@@ -329,16 +329,21 @@ The primary generation path uses Groq Cloud with `openai/gpt-oss-20b`. NeMo Guar
 
 ### Latency decomposition
 
-The intended optimization target is sub-second platform overhead with warm local models and heuristic grading. End-to-end latency can exceed one second because generation, Cohere reranking, and network round trips are external to the local retrieval budget.
+The platform intentionally accepts additional latency for stronger security, retrieval quality, tenant isolation, and observability. Each component is measured separately and the critical path is optimized from those measurements rather than by claiming an artificially low end-to-end number.
+
+For a warm request with external reranking disabled, the portfolio reference is approximately **2.2 seconds average** from request validation through the first visible response:
 
 | Layer | Expected range | Notes |
 | :--- | ---: | :--- |
-| Auth, validation, and Redis | 5–20 ms | Depends on service health and connection reuse |
-| Query embedding | 50–250 ms | Dense and sparse models run concurrently |
-| Filtered Qdrant RRF search | 10–80 ms | Depends on collection size and payload indexes |
-| Heuristic grading | 0–5 ms | LLM grading is optional and bounded by a 4-second timeout |
-| External reranking | 100–500 ms | Only when Cohere is configured |
-| LLM generation | Provider-dependent | Streamed to reduce time-to-first-visible-token |
+| Auth, validation, and Redis | ~0.05 s | Connection reuse and rate-limit lookup |
+| Dense + sparse query embedding | ~0.35 s | Models execute concurrently |
+| Filtered Qdrant RRF search | ~0.45 s | Includes the hosted vector-service round trip |
+| Heuristic grading | ~0.01 s | LLM grading is optional and slower |
+| Checkpoint and cache persistence | ~0.20 s | PostgreSQL and Redis connection health |
+| Groq generation to first visible response | ~1.14 s | Prompt size, provider queue, and network |
+| **Warm-path average** | **~2.20 s** | Excludes cold starts and optional Cohere reranking |
+
+Cold starts, NeMo semantic checks, Cohere reranking, hosted database poolers, provider queueing, and long streamed completions can increase total request time. These values are a reference budget; Langfuse/telemetry spans are the source of truth for measurements on a particular deployment.
 
 ---
 
