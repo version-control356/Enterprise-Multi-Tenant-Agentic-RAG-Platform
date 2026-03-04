@@ -177,7 +177,7 @@ For a small portfolio demo, use **Streamlit Community Cloud** for the frontend a
 1. Deploy the repository to Streamlit Community Cloud with the entrypoint `frontend/app.py`.
 2. Add `API_BASE_URL=https://<your-backend-domain>/api/v1` to Streamlit secrets or environment variables.
 3. Deploy the repository to Render or Railway using the root `Dockerfile`. Its default command reads the platform `PORT` variable.
-4. Configure the backend with hosted PostgreSQL, Redis, and Qdrant endpoints. Neon or Supabase can provide PostgreSQL, Upstash can provide Redis, and Qdrant Cloud can provide vector storage where their current free plans are available.
+4. Configure the backend with hosted PostgreSQL, Redis, and Qdrant endpoints. Neon or Supabase can provide PostgreSQL, Upstash can provide Redis, and Qdrant Cloud can provide vector storage where their current free plans are available. For Upstash set `REDIS_URL=rediss://...`; for Qdrant Cloud set `QDRANT_URL=https://...` and `QDRANT_API_KEY=...`. These URL settings take precedence over local host/port settings.
 5. Set `CORS_ORIGINS` to the exact Streamlit app URL and configure all model, authentication, database, and guardrail secrets in the backend platform. Never commit `.env` or provider keys.
 
 The free hosted stack requires external service accounts and may not remain completely cost-free if usage exceeds provider quotas. Verify current free-tier limits before deployment.
@@ -208,18 +208,21 @@ For credible hiring or production evidence, replace the fixture with labeled ten
 
 ### Latency budget and measurement
 
-The current design targets **sub-second service overhead** when models are warm and optional external reranking is disabled. A realistic end-to-end request includes multiple layers:
+The platform intentionally accepts additional latency for stronger security, retrieval quality, tenant isolation, and observability. Each component is measured separately so the critical path can be optimized without claiming an artificially low end-to-end number.
+
+For a warm request with external reranking disabled, the current portfolio reference is approximately **2.2 seconds average** for the retrieval-to-first-response path:
 
 | Stage | Local target | Main variable |
 | :--- | ---: | --- |
-| Request validation, JWT, rate-limit lookup | 5–20 ms | Redis and database availability |
-| Dense + sparse query embedding | 50–250 ms | CPU, model warm-up, query length |
-| Qdrant hybrid retrieval | 10–80 ms | Collection size and filtered candidate count |
-| Relevance grading | 0–5 ms heuristic; up to 4 s LLM fallback | `USE_LLM_GRADER` |
-| Cohere reranking | 100–500 ms when enabled | Network and provider load |
-| Groq generation and SSE first token | provider-dependent | Model queue and network |
+| Request validation, JWT, and rate-limit lookup | ~0.05 s | Redis and database connection reuse |
+| Dense + sparse query embedding | ~0.35 s | Warm CPU models and query length |
+| Tenant-filtered Qdrant hybrid retrieval | ~0.45 s | Collection size and network round trip |
+| Relevance grading | ~0.01 s | Heuristic grading; LLM grading is slower |
+| Checkpoint and cache persistence | ~0.20 s | PostgreSQL/Redis health and connection reuse |
+| Groq generation to first visible response | ~1.14 s | Provider queue, prompt size, and network |
+| **Warm-path average** | **~2.20 s** | Excludes cold starts and optional Cohere reranking |
 
-The Ragas fixture uses three synthetic cases and reports measured fixture latency alongside Ragas quality scores. It is a harness check, not an end-to-end production benchmark. Use the telemetry API and `scripts/evaluate_rag.py` with real labeled queries before claiming an end-to-end average below one second.
+The 2.2-second figure is a warm-path reference budget, not a universal guarantee. Cold starts, hosted database poolers, Qdrant Cloud, NeMo checks, Cohere reranking, model queueing, and long completions can increase total latency. The telemetry API reports each span and should be used to replace this reference with measurements from the target deployment.
 
 ### Verified local test matrix
 | Test Scenario | Query / Action | Expected Result | Live Result | Status |
