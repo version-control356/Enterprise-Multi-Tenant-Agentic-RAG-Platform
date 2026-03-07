@@ -9,10 +9,20 @@ logger = logging.getLogger(__name__)
 COLLECTION_NAME = "tenant_knowledge_base"
 VECTOR_SIZE = 384  # FastEmbed BAAI/bge-small-en-v1.5 vector dimension
 
-qdrant_client = AsyncQdrantClient(
-    host=settings.QDRANT_HOST,
-    port=settings.QDRANT_PORT
-)
+qdrant_url = settings.QDRANT_URL.strip() if settings.QDRANT_URL else None
+
+if qdrant_url:
+    logger.info(f"Connecting to Qdrant Cloud Cluster via URL")
+    qdrant_client = AsyncQdrantClient(
+        url=qdrant_url, 
+        api_key=settings.QDRANT_API_KEY or None
+    )
+else:
+    logger.info(f"Connecting to Local Qdrant Instance via Host/Port: {settings.QDRANT_HOST}")
+    qdrant_client = AsyncQdrantClient(
+        host=settings.QDRANT_HOST, 
+        port=settings.QDRANT_PORT
+    )
 
 
 async def close_qdrant() -> None:
