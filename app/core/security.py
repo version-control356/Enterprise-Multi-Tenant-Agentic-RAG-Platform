@@ -65,6 +65,22 @@ API_KEY_REGEX = r"\b(?:sk-[a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16}|ghp_[a-zA-Z0-9]{36})
 
 class SecurityGuardrails:
     @staticmethod
+    def _looks_security_sensitive(prompt: str) -> bool:
+        """Identify prompts that warrant the slower NeMo semantic check."""
+        indicators = (
+            "ignore",
+            "disregard",
+            "system prompt",
+            "jailbreak",
+            "bypass",
+            "developer mode",
+            "reveal instructions",
+            "previous instructions",
+        )
+        normalized = prompt.casefold()
+        return any(indicator in normalized for indicator in indicators)
+
+    @staticmethod
     @lru_cache(maxsize=1)
     def _presidio_engines() -> tuple[_Analyzer, _Anonymizer]:
         """Load Presidio engines only when the configured provider requires them."""
@@ -130,6 +146,11 @@ class SecurityGuardrails:
         """Run synchronous checks and optional NeMo input rails before model access."""
         sanitized = cls.sanitize_prompt(prompt)
         if settings.PROMPT_GUARDRAILS_PROVIDER != "nemo":
+            return sanitized
+        if (
+            settings.NEMO_CHECK_MODE == "suspicious"
+            and not cls._looks_security_sensitive(sanitized)
+        ):
             return sanitized
         try:
             from nemoguardrails.rails.llm.options import RailType

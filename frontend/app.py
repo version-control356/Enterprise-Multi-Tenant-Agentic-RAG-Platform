@@ -6,6 +6,7 @@ import re
 import time
 import httpx
 import streamlit as st
+from html import unescape
 from urllib.parse import urlparse
 
 
@@ -116,6 +117,13 @@ def parse_jwt_claims(token: str) -> dict:
     except Exception:
         pass
     return {}
+
+
+def clean_assistant_markdown(content: str) -> str:
+    """Normalize model-generated HTML formatting for Streamlit Markdown."""
+    cleaned = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL | re.IGNORECASE)
+    cleaned = re.sub(r"<br\s*/?>", "\n", cleaned, flags=re.IGNORECASE)
+    return unescape(cleaned).strip()
 
 
 def fetch_tenant_documents():
@@ -420,7 +428,11 @@ with tab_chat:
     with chat_container:
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+                st.markdown(
+                    clean_assistant_markdown(message["content"])
+                    if message["role"] == "assistant"
+                    else message["content"]
+                )
                 if message.get("cached"):
                     st.markdown('<span class="badge-pill badge-cached">⚡ Instant Cache Hit (Redis)</span>', unsafe_allow_html=True)
 
@@ -481,13 +493,13 @@ with tab_chat:
                                         if chunk_data.get("trace_id"):
                                             trace_id = chunk_data.get("trace_id")
 
-                                        clean_display = re.sub(r"<think>.*?</think>", "", response_text, flags=re.DOTALL).lstrip()
+                                        clean_display = clean_assistant_markdown(response_text)
                                         if clean_display:
                                             placeholder.markdown(f"{clean_display}▌")
 
                                 dur_total = round((time.perf_counter() - t_start) * 1000, 1)
                                 ttft_ms = round((first_token_time - t_start) * 1000, 1) if first_token_time else dur_total
-                                final_clean = re.sub(r"<think>.*?</think>", "", response_text, flags=re.DOTALL).strip()
+                                final_clean = clean_assistant_markdown(response_text)
                                 placeholder.markdown(final_clean)
                                 
                                 meta_badges = '<div class="response-meta">'
