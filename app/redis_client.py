@@ -7,17 +7,27 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-redis_pool = redis.ConnectionPool(
-    host=settings.REDIS_HOST,
-    port=settings.REDIS_PORT,
-    db=0,
-    decode_responses=True,
-    max_connections=20,
-    socket_connect_timeout=5,
-    socket_timeout=10,
-)
-
-redis_client = redis.Redis(connection_pool=redis_pool)
+if settings.REDIS_URL:
+    redis_client = redis.from_url(
+        settings.REDIS_URL,
+        db=0,
+        decode_responses=True,
+        max_connections=20,
+        socket_connect_timeout=5,
+        socket_timeout=10,
+    )
+    redis_pool = redis_client.connection_pool
+else:
+    redis_pool = redis.ConnectionPool(
+        host=settings.REDIS_HOST,
+        port=settings.REDIS_PORT,
+        db=0,
+        decode_responses=True,
+        max_connections=20,
+        socket_connect_timeout=5,
+        socket_timeout=10,
+    )
+    redis_client = redis.Redis(connection_pool=redis_pool)
 
 INGESTION_QUEUE = "ingestion_jobs"
 INGESTION_PROCESSING_QUEUE = "ingestion_jobs:processing"

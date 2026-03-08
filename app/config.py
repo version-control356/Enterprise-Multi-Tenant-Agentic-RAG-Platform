@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Literal
 from pydantic import Field, field_validator, model_validator
+from urllib.parse import quote
 
 
 class Settings(BaseSettings):
@@ -17,7 +18,9 @@ class Settings(BaseSettings):
     OIDC_ROLE_CLAIM: str = "role"
     OIDC_ALGORITHMS: str = "RS256"
     PII_PROVIDER: Literal["regex", "presidio"] = "regex"
+    REDACT_DOCUMENT_PII: bool = False
     PROMPT_GUARDRAILS_PROVIDER: Literal["regex", "nemo"] = "regex"
+    NEMO_CHECK_MODE: Literal["all", "suspicious"] = "all"
     NEMO_GUARDRAILS_CONFIG_PATH: str = "guardrails"
     BOOTSTRAP_ADMIN_USERNAME: str = ""
     BOOTSTRAP_ADMIN_PASSWORD: str = Field(default="", max_length=72)
@@ -57,9 +60,12 @@ class Settings(BaseSettings):
 
     REDIS_HOST: str = "redis"
     REDIS_PORT: int = 6379
+    REDIS_URL: str = ""
 
     QDRANT_HOST: str = "qdrant"
     QDRANT_PORT: int = 6333
+    QDRANT_URL: str = ""
+    QDRANT_API_KEY: str = ""
 
     @field_validator("ALGORITHM")
     @classmethod
@@ -121,16 +127,20 @@ class Settings(BaseSettings):
 
     @property
     def postgres_dsn(self) -> str:
+        user = quote(self.POSTGRES_USER, safe="")
+        password = quote(self.POSTGRES_PASSWORD, safe="")
         return (
-            f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+            f"postgresql://{user}:{password}"
             f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
             f"?connect_timeout=10"
         )
 
     @property
     def async_postgres_dsn(self) -> str:
+        user = quote(self.POSTGRES_USER, safe="")
+        password = quote(self.POSTGRES_PASSWORD, safe="")
         return (
-            f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+            f"postgresql+asyncpg://{user}:{password}"
             f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
         )
 

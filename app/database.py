@@ -30,7 +30,7 @@ async def init_pool() -> None:
             min_size=1,
             max_size=20,
             open=False,
-            kwargs={"row_factory": dict_row}
+            kwargs={"row_factory": dict_row, "prepare_threshold": None}
         )
         await pool.open()
 
@@ -63,7 +63,8 @@ async def init_db() -> None:
     try:
         async with await psycopg.AsyncConnection.connect(
             settings.postgres_dsn, 
-            autocommit=True
+            autocommit=True,
+            prepare_threshold=None,
         ) as conn:
             checkpointer = AsyncPostgresSaver(conn)
             await checkpointer.setup()
