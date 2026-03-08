@@ -135,7 +135,9 @@ async def retrieve_node(state: AgentState) -> dict:
                 )
                 rerank_meta["reranked_count"] = len(context_chunks)
 
-        retrieved_context = SecurityGuardrails.redact_pii("\n\n".join(context_chunks))
+        retrieved_context = "\n\n".join(context_chunks)
+        if settings.REDACT_DOCUMENT_PII:
+            retrieved_context = SecurityGuardrails.redact_pii(retrieved_context)
 
     return {
         "context": retrieved_context,
@@ -264,6 +266,7 @@ async def generate_node(state: AgentState) -> dict:
                 "3. If the Document Context is empty, marked as 'No relevant context found.', or does not contain the specific facts needed to answer the question, state politely: 'Your authorized workspace documents do not contain information regarding this topic.' Do NOT dump or disclose document filenames unless explicitly asked.\n"
                 "4. STRICT PROHIBITION: NEVER use pre-trained world knowledge, outside assumptions, or hallucinated facts to answer questions that are not present in the Document Context.\n"
                 "5. Do NOT output internal reasoning, chain-of-thought, or <think> tags.\n\n"
+                "6. Use clean plain Markdown with normal line breaks; do not emit HTML such as <br>. Refer to the document according to its actual content.\n\n"
                 f"Document Context:\n{bounded_context}"
             )
         else:
@@ -274,6 +277,7 @@ async def generate_node(state: AgentState) -> dict:
                 "2. Provide clear, comprehensive, and well-structured answers using the provided Document Context.\n"
                 "3. Do NOT hallucinate unsupported facts. If a specific question cannot be answered from the provided documents, politely mention that no matching records were found in authorized files.\n"
                 "4. Do NOT output internal reasoning, chain-of-thought, or <think> tags.\n\n"
+                "5. Use clean plain Markdown with normal line breaks; do not emit HTML such as <br>. Refer to the document according to its actual content.\n\n"
                 f"Document Context:\n{bounded_context}"
             )
 

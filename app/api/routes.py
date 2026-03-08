@@ -275,7 +275,11 @@ async def _process_document_ingestion(
         content,
         filename,
     )
-    sanitized_text = SecurityGuardrails.redact_pii(raw_text)
+    sanitized_text = (
+        SecurityGuardrails.redact_pii(raw_text)
+        if settings.REDACT_DOCUMENT_PII
+        else raw_text
+    )
     chunks = await asyncio.to_thread(
         UniversalDocumentParser.chunk_document,
         sanitized_text,
@@ -732,12 +736,12 @@ async def chat_stream(
                                     post_think = think_buffer.split("</think>", 1)[1]
                                     think_buffer = ""
                                     if post_think.strip():
-                                        sanitized_token = SecurityGuardrails.redact_pii(post_think.lstrip())
+                                        sanitized_token = post_think.lstrip()
                                         full_response += sanitized_token
                                         yield f"data: {json.dumps({'content': sanitized_token, 'trace_id': request_id})}\n\n"
                                 continue
 
-                            sanitized_token = SecurityGuardrails.redact_pii(token)
+                            sanitized_token = token
                             full_response += sanitized_token
                             yield f"data: {json.dumps({'content': sanitized_token, 'trace_id': request_id})}\n\n"
                             think_buffer = ""
