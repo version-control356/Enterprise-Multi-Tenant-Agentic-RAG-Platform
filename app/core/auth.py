@@ -1,5 +1,8 @@
 from datetime import datetime, timedelta, timezone
 import time
+import hashlib
+import uuid
+from functools import lru_cache
 from collections.abc import Mapping
 from typing import Any, Optional, cast
 import httpx
@@ -10,6 +13,7 @@ from passlib.context import CryptContext
 from pydantic import BaseModel, Field, ValidationError
 from app.config import settings
 import app.database as database
+from app.redis_client import is_token_revoked, revoke_token
 
 # Password hashing configuration
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -26,6 +30,12 @@ _oidc_jwks: dict[str, object] = {}
 _oidc_jwks_expires_at = 0.0
 
 
+@lru_cache(maxsize=1)
+def _dummy_password_hash() -> str:
+    """Create a process-local hash for timing-equivalent unknown-user checks."""
+    return pwd_context.hash("invalid" + "-login-password")
+
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
@@ -39,7 +49,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     expire = datetime.now(timezone.utc) + (
         expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
-    to_encode.update({"exp": expire})
+    to_encode.update({"exp": expire, "jti": str(uuid.uuid4()), "token_type": "access"})
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
@@ -67,15 +77,21 @@ async def authenticate_user(username: str, password: str, tenant_id: str) -> Opt
         async with connection.cursor() as cursor:
             await cursor.execute(
                 """
-                SELECT username, tenant_id, role, password_hash
+                SELECT username, tenant_id, role, password_hash,
+                       failed_login_attempts, locked_until, is_active
                 FROM tenant_users
                 WHERE username = %s AND tenant_id = %s
+                FOR UPDATE
                 """,
                 (username, tenant_id),
             )
             user = cast(Mapping[str, object] | None, await cursor.fetchone())
 
             if not user:
+                verify_password(
+                    password,
+                    _dummy_password_hash(),
+                )
                 return None
             password_hash = user.get("password_hash")
             username_value = user.get("username")
@@ -89,8 +105,40 @@ async def authenticate_user(username: str, password: str, tenant_id: str) -> Opt
                 return None
             if not isinstance(role_value, str):
                 return None
-            if not verify_password(password, password_hash):
+            if user.get("is_active") is False:
                 return None
+            locked_until = user.get("locked_until")
+            if isinstance(locked_until, datetime) and locked_until > datetime.now(timezone.utc):
+                return None
+            if not verify_password(password, password_hash):
+                await cursor.execute(
+                    """
+                    UPDATE tenant_users
+                    SET failed_login_attempts = failed_login_attempts + 1,
+                        locked_until = CASE
+                            WHEN failed_login_attempts + 1 >= %s
+                            THEN NOW() + (%s * INTERVAL '1 minute')
+                            ELSE locked_until
+                        END,
+                        updated_at = NOW()
+                    WHERE tenant_id = %s AND username = %s
+                    """,
+                    (
+                        settings.MAX_FAILED_LOGIN_ATTEMPTS,
+                        settings.ACCOUNT_LOCK_MINUTES,
+                        tenant_id,
+                        username,
+                    ),
+                )
+                return None
+            await cursor.execute(
+                """
+                UPDATE tenant_users
+                SET failed_login_attempts = 0, locked_until = NULL, updated_at = NOW()
+                WHERE tenant_id = %s AND username = %s
+                """,
+                (tenant_id, username),
+            )
             return TokenData(user_id=username_value, tenant_id=tenant_value, role=role_value)
 
 
@@ -111,7 +159,10 @@ async def get_current_tenant_user(token: str = Depends(oauth2_scheme)) -> TokenD
         user_id: str = payload.get("sub", "")
         tenant_id: str = payload.get("tenant_id", "")
         role: str = payload.get("role", "")
+        token_id: str = payload.get("jti", "")
         if not user_id or not tenant_id or not role:
+            raise credentials_exception
+        if token_id and await is_token_revoked(hashlib.sha256(token.encode("utf-8")).hexdigest()):
             raise credentials_exception
         user = TokenData(user_id=user_id, tenant_id=tenant_id, role=role)
         if not await database.is_active_tenant_user(user.tenant_id, user.user_id, user.role):
@@ -119,6 +170,16 @@ async def get_current_tenant_user(token: str = Depends(oauth2_scheme)) -> TokenD
         return user
     except (JWTError, ValidationError, ValueError):
         raise credentials_exception
+
+
+async def revoke_access_token(token: str) -> None:
+    """Revoke a local access token for its remaining lifetime."""
+    payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+    expires_at = payload.get("exp")
+    if not isinstance(expires_at, (int, float)):
+        return
+    ttl_seconds = max(1, int(expires_at - time.time()))
+    await revoke_token(hashlib.sha256(token.encode("utf-8")).hexdigest(), ttl_seconds)
 
 
 async def verify_oidc_token(token: str) -> TokenData:

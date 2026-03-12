@@ -21,6 +21,8 @@ from app.core.auth import (
     get_current_tenant_user,
     register_tenant_user,
     TokenData,
+    revoke_access_token,
+    oauth2_scheme,
 )
 from app.core.security import SecurityGuardrails
 from app.core.audit import record_audit_event
@@ -45,6 +47,7 @@ from app.database import (
     delete_tenant_document,
     delete_all_tenant_documents,
     get_tenant_document_usage,
+    get_tenant_document_id,
 )
 from app.tenant_user import list_tenant_users, delete_tenant_user
 from app.redis_client import (
@@ -258,6 +261,17 @@ async def login_for_access_token(
     return {"access_token": access_token, "token_type": "bearer"}
 
 
+@router.post("/auth/logout")
+async def logout(
+    token: str = Depends(oauth2_scheme),
+    _current_user: TokenData = Depends(get_current_tenant_user),
+) -> dict[str, str]:
+    """Revoke the current local access token until its configured expiration."""
+    if settings.AUTH_MODE == "local":
+        await revoke_access_token(token)
+    return {"status": "logged_out"}
+
+
 _ingestion_tasks: Dict[str, Dict[str, Any]] = {}
 
 
@@ -327,17 +341,41 @@ async def _process_document_ingestion(
             )
         )
 
-    await delete_documents_from_qdrant(tenant_id, filename=filename)
-    await upsert_documents_to_qdrant(points)
-    await record_document(
-        doc_id=doc_id,
-        tenant_id=tenant_id,
-        filename=filename,
-        size_bytes=len(content),
-        chunks_count=len(chunks),
-        created_by=user_id,
-        allowed_roles=",".join(roles_list),
-    )
+    previous_doc_id = await get_tenant_document_id(tenant_id, filename)
+    try:
+        await upsert_documents_to_qdrant(points)
+    except Exception:
+        raise RuntimeError(
+            "Document ingestion could not be committed consistently across storage backends."
+        ) from None
+    try:
+        await record_document(
+            doc_id=doc_id,
+            tenant_id=tenant_id,
+            filename=filename,
+            size_bytes=len(content),
+            chunks_count=len(chunks),
+            created_by=user_id,
+            allowed_roles=",".join(roles_list),
+        )
+    except Exception:
+        try:
+            await delete_documents_from_qdrant(tenant_id, doc_id=doc_id)
+        except Exception:
+            logger.exception("Compensating Qdrant cleanup failed for document %s.", doc_id)
+        raise RuntimeError(
+            "Document ingestion could not be committed consistently across storage backends."
+        ) from None
+    try:
+        if previous_doc_id:
+            await delete_documents_from_qdrant(tenant_id, doc_id=previous_doc_id)
+        else:
+            await delete_documents_from_qdrant(tenant_id, filename=filename)
+    except Exception as error:
+        logger.exception("Qdrant replacement cleanup failed for document %s.", doc_id)
+        raise RuntimeError(
+            "Document metadata was saved, but obsolete vector cleanup failed; retry cleanup."
+        ) from error
     await bump_tenant_cache_version(tenant_id)
     if request:
         record_audit_event(
@@ -409,19 +447,36 @@ async def run_ingestion_worker() -> None:
             if not job:
                 continue
             task_id = str(job["task_id"])
-            content = await get_ingestion_payload(task_id)
-            if content is None:
-                logger.error("Ingestion payload missing for task %s.", task_id)
-                continue
-            await _run_async_ingestion(
-                task_id=task_id,
-                content=content,
-                filename=str(job["filename"]),
-                allowed_roles=str(job["allowed_roles"]),
-                tenant_id=str(job["tenant_id"]),
-                user_id=str(job["user_id"]),
-            )
-            await acknowledge_ingestion_job(job)
+            try:
+                content = await get_ingestion_payload(task_id)
+                if content is None:
+                    logger.error("Ingestion payload missing for task %s.", task_id)
+                    _ingestion_tasks[task_id] = {
+                        **job,
+                        "status": "failed",
+                        "chunks_ingested": 0,
+                        "error": "Ingestion payload is unavailable.",
+                        "timestamp": time.time(),
+                    }
+                    await set_ingestion_task(task_id, _ingestion_tasks[task_id])
+                else:
+                    processing_task = {
+                        **job,
+                        "status": "processing",
+                        "timestamp": time.time(),
+                    }
+                    _ingestion_tasks[task_id] = processing_task
+                    await set_ingestion_task(task_id, processing_task)
+                    await _run_async_ingestion(
+                        task_id=task_id,
+                        content=content,
+                        filename=str(job["filename"]),
+                        allowed_roles=str(job["allowed_roles"]),
+                        tenant_id=str(job["tenant_id"]),
+                        user_id=str(job["user_id"]),
+                    )
+            finally:
+                await acknowledge_ingestion_job(job)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -532,7 +587,25 @@ async def ingest_document_async(
             user_id=current_user.user_id,
         )
     except Exception as error:
-        _ingestion_tasks.pop(task_id, None)
+        _ingestion_tasks[task_id] = {
+            **_ingestion_tasks[task_id],
+            "status": "failed",
+            "error": "Ingestion queue is unavailable. Please retry shortly.",
+            "timestamp": time.time(),
+        }
+        await set_ingestion_task(task_id, _ingestion_tasks[task_id])
+        try:
+            await acknowledge_ingestion_job(
+                {
+                    "task_id": task_id,
+                    "filename": filename,
+                    "allowed_roles": allowed_roles,
+                    "tenant_id": current_user.tenant_id,
+                    "user_id": current_user.user_id,
+                }
+            )
+        except Exception:
+            logger.warning("Failed to clean up queued payload for task %s.", task_id)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Ingestion queue is unavailable. Please retry shortly.",
@@ -552,7 +625,13 @@ async def get_ingestion_status(
     current_user: TokenData = Depends(get_current_tenant_user),
 ) -> Dict[str, Any]:
     """Check status and chunk results for a background ingestion task."""
-    task = await get_ingestion_task(task_id)
+    try:
+        task = await get_ingestion_task(task_id)
+    except Exception as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Ingestion status store is unavailable. Please retry shortly.",
+        ) from error
     if task is None:
         task = _ingestion_tasks.get(task_id)
     if not task:
@@ -676,6 +755,9 @@ async def chat_stream(
     )
     cached = await get_cached_response(cache_key)
     if cached:
+        cached_response = await SecurityGuardrails.sanitize_output_async(
+            str(cached.get("response", ""))
+        )
         telemetry_tracker.finalize_trace(
             trace_id=request_id,
             tenant_id=current_user.tenant_id,
@@ -686,7 +768,7 @@ async def chat_stream(
             cache_hit=True,
         )
         async def cached_stream():
-            yield f"data: {json.dumps({'content': cached['response'], 'cached': True, 'trace_id': request_id})}\n\n"
+            yield f"data: {json.dumps({'content': cached_response, 'cached': True, 'trace_id': request_id})}\n\n"
         return StreamingResponse(cached_stream(), media_type="text/event-stream")
 
     async def event_generator() -> AsyncGenerator[str, None]:
@@ -726,25 +808,39 @@ async def chat_stream(
                         if chunk and hasattr(chunk, "content") and chunk.content:
                             token = str(chunk.content)
                             think_buffer += token
-
-                            if "<think>" in think_buffer and not inside_think:
-                                inside_think = True
-
-                            if inside_think:
-                                if "</think>" in think_buffer:
+                            visible_fragments: list[str] = []
+                            while think_buffer:
+                                if inside_think:
+                                    close_index = think_buffer.find("</think>")
+                                    if close_index < 0:
+                                        think_buffer = think_buffer[-7:]
+                                        break
+                                    think_buffer = think_buffer[close_index + len("</think>"):]
                                     inside_think = False
-                                    post_think = think_buffer.split("</think>", 1)[1]
-                                    think_buffer = ""
-                                    if post_think.strip():
-                                        sanitized_token = post_think.lstrip()
-                                        full_response += sanitized_token
-                                        yield f"data: {json.dumps({'content': sanitized_token, 'trace_id': request_id})}\n\n"
-                                continue
+                                    continue
+                                open_index = think_buffer.find("<think>")
+                                if open_index >= 0:
+                                    if open_index:
+                                        visible_fragments.append(think_buffer[:open_index])
+                                    think_buffer = think_buffer[open_index + len("<think>"):]
+                                    inside_think = True
+                                    continue
+                                if len(think_buffer) > 6:
+                                    visible_fragments.append(think_buffer[:-6])
+                                    think_buffer = think_buffer[-6:]
+                                break
 
-                            sanitized_token = token
-                            full_response += sanitized_token
-                            yield f"data: {json.dumps({'content': sanitized_token, 'trace_id': request_id})}\n\n"
-                            think_buffer = ""
+                            for fragment in visible_fragments:
+                                sanitized_token = await SecurityGuardrails.sanitize_output_async(fragment)
+                                if sanitized_token:
+                                    full_response += sanitized_token
+                                    yield f"data: {json.dumps({'content': sanitized_token, 'trace_id': request_id})}\n\n"
+
+                if not inside_think and think_buffer:
+                    sanitized_token = await SecurityGuardrails.sanitize_output_async(think_buffer)
+                    if sanitized_token:
+                        full_response += sanitized_token
+                        yield f"data: {json.dumps({'content': sanitized_token, 'trace_id': request_id})}\n\n"
 
             if full_response:
                 await set_cached_response(cache_key, {"response": full_response})
@@ -811,6 +907,8 @@ async def clear_tenant_telemetry(
     current_user: TokenData = Depends(get_current_tenant_user),
 ) -> dict[str, Any]:
     """Clear recorded in-memory telemetry traces for the authenticated tenant."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator role required.")
     purged_count = telemetry_tracker.clear_traces(tenant_id=current_user.tenant_id)
     return {"status": "cleared", "tenant_id": current_user.tenant_id, "purged_traces": purged_count}
 

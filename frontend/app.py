@@ -1,13 +1,15 @@
 """Enterprise Streamlit dashboard for the Enterprise Multi-Tenant Agentic RAG Platform."""
 
 import json
+import logging
 import os
 import re
 import time
 import httpx
 import streamlit as st
-from html import unescape
-from urllib.parse import urlparse
+from html import escape, unescape
+
+logger = logging.getLogger(__name__)
 
 
 st.set_page_config(
@@ -19,7 +21,7 @@ st.set_page_config(
 
 _raw_api_url = os.getenv("API_BASE_URL", "").strip().rstrip("/")
 if not _raw_api_url:
-    _raw_api_url = "https://enterprise-multi-tenant-agentic-rag.onrender.com"
+    _raw_api_url = "http://localhost:8000/api/v1"
 
 if not _raw_api_url.endswith("/api/v1"):
     if _raw_api_url.endswith("/api"):
@@ -34,7 +36,7 @@ try:
     if "localhost" in st.get_option("browser.serverAddress") or "127.0.0.1" in st.get_option("browser.serverAddress"):
         API_BASE_URL = "http://localhost:8000/api/v1"
 except Exception:
-    pass
+    API_BASE_URL = _raw_api_url
 
 
 
@@ -115,7 +117,7 @@ def parse_jwt_claims(token: str) -> dict:
             payload_bytes = base64.urlsafe_b64decode(padded)
             return json.loads(payload_bytes.decode("utf-8"))
     except Exception:
-        pass
+        logger.debug("Unable to parse JWT claims.", exc_info=True)
     return {}
 
 
@@ -178,13 +180,16 @@ with st.sidebar:
                 st.error(f"⚠️ Backend unavailable: {error}")
     else:
         role_class = f"badge-{st.session_state.user_role}" if st.session_state.user_role in ["admin", "analyst", "viewer"] else "badge-trace"
+        safe_username = escape(str(st.session_state.username or ""))
+        safe_tenant_id = escape(str(st.session_state.tenant_id or ""))
+        safe_role = escape(str(st.session_state.user_role or ""))
         st.markdown(f"""
         <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 0.8rem; margin-bottom: 0.8rem;">
             <div style="font-size: 0.8rem; color: #64748b;">Logged in as</div>
-            <div style="font-size: 1rem; font-weight: 700; color: #0f172a;">{st.session_state.username}</div>
+            <div style="font-size: 1rem; font-weight: 700; color: #0f172a;">{safe_username}</div>
             <div style="margin-top: 0.4rem;">
-                <span class="badge-pill badge-tenant">🏢 {st.session_state.tenant_id}</span>
-                <span class="badge-pill {role_class}">👑 {st.session_state.user_role}</span>
+                <span class="badge-pill badge-tenant">🏢 {safe_tenant_id}</span>
+                <span class="badge-pill {role_class}">👑 {safe_role}</span>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -330,12 +335,16 @@ with st.sidebar:
             for doc in st.session_state.uploaded_docs:
                 size_kb = round(doc["size_bytes"] / 1024, 1)
                 doc_roles = [r.strip() for r in doc.get("allowed_roles", "admin").split(",") if r.strip()]
-                roles_badges_sb = " ".join(f'<span class="badge-pill badge-{r}" style="font-size: 0.65rem; padding: 0.15rem 0.4rem;">{r}</span>' for r in doc_roles)
+                roles_badges_sb = " ".join(
+                    f'<span class="badge-pill badge-{escape(r)}" style="font-size: 0.65rem; padding: 0.15rem 0.4rem;">{escape(r)}</span>'
+                    for r in doc_roles
+                )
+                safe_filename = escape(str(doc.get("filename", "")))
                 col_sd1, col_sd2 = st.columns([3, 1])
                 with col_sd1:
                     st.markdown(f"""
                     <div class="doc-item">
-                        <div style="font-weight: 600; color: #1e293b;">📄 {doc['filename']}</div>
+                        <div style="font-weight: 600; color: #1e293b;">📄 {safe_filename}</div>
                         <div style="margin-top: 0.2rem;">{roles_badges_sb}</div>
                         <div style="font-size: 0.75rem; color: #64748b; margin-top: 0.2rem;">
                             {doc['chunks_count']} chunks • {size_kb} KB
@@ -369,10 +378,12 @@ with col_h1:
 
 with col_h2:
     if st.session_state.jwt_token:
+        safe_header_tenant = escape(str(st.session_state.tenant_id or ""))
+        safe_header_role = escape(str(st.session_state.user_role or ""))
         st.markdown(f"""
         <div style="text-align: right; margin-top: 1rem;">
-            <span class="badge-pill badge-tenant">Tenant: {st.session_state.tenant_id}</span>
-            <span class="badge-pill badge-{st.session_state.user_role}">{st.session_state.user_role}</span>
+            <span class="badge-pill badge-tenant">Tenant: {safe_header_tenant}</span>
+            <span class="badge-pill {role_class}">{safe_header_role}</span>
         </div>
         """, unsafe_allow_html=True)
 
@@ -401,8 +412,8 @@ with tab_chat:
                         timeout=REQUEST_TIMEOUT,
                         follow_redirects=True,
                     )
-                except Exception:
-                    pass
+                except httpx.HTTPError:
+                    logger.debug("Thread history delete failed.", exc_info=True)
             st.session_state.messages = []
             st.toast("Active thread history cleared!", icon="🧹")
             st.rerun()
@@ -648,21 +659,24 @@ with tab_docs:
                 size_kb = round(doc["size_bytes"] / 1024, 1)
                 doc_roles = [r.strip() for r in doc.get("allowed_roles", "admin").split(",") if r.strip()]
                 roles_badges_html = " ".join(
-                    f'<span class="badge-pill badge-{r}">{r}</span>' for r in doc_roles
+                    f'<span class="badge-pill badge-{escape(r)}">{escape(r)}</span>' for r in doc_roles
                 )
+                safe_filename = escape(str(doc.get("filename", "")))
+                safe_created_by = escape(str(doc.get("created_by", "")))
+                safe_created_at = escape(str(doc.get("created_at", ""))[:19].replace("T", " "))
                 col_card, col_btn = st.columns([5, 1])
                 with col_card:
                     st.markdown(f"""
                     <div style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; margin-bottom: 0.8rem; box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <div style="font-size: 1.05rem; font-weight: 700; color: #0f172a;">📄 {doc['filename']}</div>
+                            <div style="font-size: 1.05rem; font-weight: 700; color: #0f172a;">📄 {safe_filename}</div>
                             <div>{roles_badges_html}</div>
                         </div>
                         <div style="display: flex; gap: 1.5rem; margin-top: 0.5rem; font-size: 0.85rem; color: #475569;">
                             <span>📊 <b>Chunks:</b> {doc['chunks_count']}</span>
                             <span>💾 <b>Size:</b> {size_kb} KB</span>
-                            <span>👤 <b>Uploaded by:</b> {doc['created_by']}</span>
-                            <span>📅 <b>Uploaded at:</b> {doc['created_at'][:19].replace('T', ' ')}</span>
+                            <span>👤 <b>Uploaded by:</b> {safe_created_by}</span>
+                            <span>📅 <b>Uploaded at:</b> {safe_created_at}</span>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
