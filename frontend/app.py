@@ -19,7 +19,8 @@ st.set_page_config(
 
 _raw_api_url = os.getenv("API_BASE_URL", "").strip().rstrip("/")
 if not _raw_api_url:
-    _raw_api_url = "http://backend:8000/api/v1"
+    _raw_api_url = "https://enterprise-multi-tenant-agentic-rag.onrender.com"
+
 if not _raw_api_url.endswith("/api/v1"):
     if _raw_api_url.endswith("/api"):
         API_BASE_URL = f"{_raw_api_url}/v1"
@@ -29,9 +30,8 @@ else:
     API_BASE_URL = _raw_api_url
 
 try:
-    current_url = st.query_params.get("_", "")
-    parsed = urlparse(current_url)
-    if parsed.scheme and parsed.netloc and "localhost" in parsed.netloc:
+   
+    if "localhost" in st.get_option("browser.serverAddress") or "127.0.0.1" in st.get_option("browser.serverAddress"):
         API_BASE_URL = "http://localhost:8000/api/v1"
 except Exception:
     pass
