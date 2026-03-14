@@ -1,6 +1,7 @@
 import logging
 import json
 import base64
+import time
 from typing import Any, Optional
 import redis.asyncio as redis
 from app.config import settings
@@ -31,6 +32,8 @@ else:
 
 INGESTION_QUEUE = "ingestion_jobs"
 INGESTION_PROCESSING_QUEUE = "ingestion_jobs:processing"
+INGESTION_LEASES = "ingestion_jobs:leases"
+INGESTION_LEASE_TIMEOUT_SECONDS = 900
 
 
 async def close_redis() -> None:
@@ -81,7 +84,10 @@ async def is_rate_limit_exceeded(cache_key: str, limit: int, window_seconds: int
             await redis_client.expire(cache_key, window_seconds)
         return request_count > limit
     except Exception as error:
-        logger.warning("Redis rate-limit check failed; allowing request: %s", error)
+        if settings.REQUIRE_REDIS:
+            logger.error("Redis rate-limit check failed; blocking request: %s", error)
+            return True
+        logger.warning("Redis rate-limit check failed; allowing request in development: %s", error)
         return False
 
 
@@ -112,6 +118,8 @@ async def set_ingestion_task(task_id: str, task: dict[str, Any], ttl_seconds: in
         await redis_client.setex(f"ingestion_task:{task_id}", ttl_seconds, json.dumps(task))
     except Exception as error:
         logger.warning("Redis ingestion-task write failed: %s", error)
+        if settings.REQUIRE_REDIS:
+            raise
 
 
 async def get_ingestion_task(task_id: str) -> Optional[dict[str, Any]]:
@@ -121,6 +129,8 @@ async def get_ingestion_task(task_id: str) -> Optional[dict[str, Any]]:
         return json.loads(data) if data else None
     except Exception as error:
         logger.warning("Redis ingestion-task read failed: %s", error)
+        if settings.REQUIRE_REDIS:
+            raise
         return None
 
 
@@ -149,13 +159,47 @@ async def enqueue_ingestion_job(
 
 
 async def claim_ingestion_job(timeout_seconds: int = 3) -> Optional[dict[str, Any]]:
-    """Claim one ingestion job while retaining it in a processing queue for acknowledgement."""
+    """Claim one ingestion job and create a lease that can be reclaimed after a crash."""
+    try:
+        await reclaim_stale_ingestion_jobs()
+    except Exception as error:
+        if settings.REQUIRE_REDIS:
+            raise
+        logger.warning("Unable to reclaim stale ingestion jobs in development: %s", error)
     raw_job = await redis_client.brpoplpush(
         INGESTION_QUEUE,
         INGESTION_PROCESSING_QUEUE,
         timeout=timeout_seconds,
     )
-    return json.loads(raw_job) if raw_job else None
+    if not raw_job:
+        return None
+    try:
+        await redis_client.zadd(
+            INGESTION_LEASES,
+            {raw_job: time.time() + INGESTION_LEASE_TIMEOUT_SECONDS},
+        )
+    except Exception:
+        if settings.REQUIRE_REDIS:
+            raise
+        logger.warning("Unable to create an ingestion lease in development.", exc_info=True)
+    return json.loads(raw_job)
+
+
+async def reclaim_stale_ingestion_jobs() -> int:
+    """Requeue processing jobs whose worker lease expired after a crash."""
+    now = time.time()
+    stale_jobs = await redis_client.zrangebyscore(INGESTION_LEASES, "-inf", now)
+    reclaimed = 0
+    for raw_job in stale_jobs:
+        if not await redis_client.zrem(INGESTION_LEASES, raw_job):
+            continue
+        await redis_client.lrem(INGESTION_PROCESSING_QUEUE, 1, raw_job)
+        job = json.loads(raw_job)
+        job["attempt"] = int(job.get("attempt", 0)) + 1
+        await redis_client.rpush(INGESTION_QUEUE, json.dumps(job))
+        reclaimed += 1
+        logger.warning("Reclaimed stale ingestion job %s (attempt %s).", job.get("task_id"), job["attempt"])
+    return reclaimed
 
 
 async def get_ingestion_payload(task_id: str) -> Optional[bytes]:
@@ -168,7 +212,28 @@ async def acknowledge_ingestion_job(job: dict[str, Any]) -> None:
     """Remove a completed ingestion job and its payload from Redis."""
     task_id = str(job["task_id"])
     job_key = f"ingestion_payload:{task_id}"
+    raw_job = json.dumps(job)
     async with redis_client.pipeline(transaction=True) as pipeline:
-        await pipeline.lrem(INGESTION_PROCESSING_QUEUE, 1, json.dumps(job))
+        await pipeline.lrem(INGESTION_PROCESSING_QUEUE, 1, raw_job)
+        await pipeline.zrem(INGESTION_LEASES, raw_job)
         await pipeline.delete(job_key)
         await pipeline.execute()
+
+
+async def revoke_token(token_hash: str, ttl_seconds: int) -> None:
+    """Mark an access token hash as revoked until its natural expiration."""
+    try:
+        await redis_client.setex(f"revoked_token:{token_hash}", ttl_seconds, "1")
+    except Exception as error:
+        logger.warning("Redis token revocation write failed: %s", error)
+        if settings.REQUIRE_REDIS:
+            raise
+
+
+async def is_token_revoked(token_hash: str) -> bool:
+    """Return whether an access-token hash has been revoked."""
+    try:
+        return bool(await redis_client.exists(f"revoked_token:{token_hash}"))
+    except Exception as error:
+        logger.warning("Redis token revocation check failed: %s", error)
+        return settings.REQUIRE_REDIS

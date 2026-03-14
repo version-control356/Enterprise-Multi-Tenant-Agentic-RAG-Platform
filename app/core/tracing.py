@@ -4,6 +4,7 @@ import time
 import logging
 import asyncio
 import httpx
+import uuid
 from collections import deque
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -65,6 +66,7 @@ class TelemetryTracker:
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Asynchronously measure and record an execution span."""
         start = time.perf_counter()
+        start_wall = time.time()
         span_meta = metadata.copy() if metadata else {}
         status = "ok"
         try:
@@ -75,12 +77,13 @@ class TelemetryTracker:
             raise
         finally:
             end = time.perf_counter()
+            end_wall = time.time()
             duration_ms = round((end - start) * 1000, 2)
             span = SpanRecord(
-                span_id=f"{span_name}_{int(start * 1000)}",
+                span_id=f"{span_name}_{uuid.uuid4()}",
                 name=span_name,
-                start_time=round(start, 4),
-                end_time=round(end, 4),
+                start_time=round(start_wall, 4),
+                end_time=round(end_wall, 4),
                 duration_ms=duration_ms,
                 status=status,
                 metadata=span_meta,
@@ -102,7 +105,8 @@ class TelemetryTracker:
         error_message: Optional[str] = None,
     ) -> TraceRecord:
         """Assemble, store, and asynchronously sync trace records with Langfuse."""
-        total_duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        elapsed_seconds = time.perf_counter() - start_time
+        total_duration_ms = round(elapsed_seconds * 1000, 2)
         spans = self._active_spans.pop(trace_id, [])
 
         query_preview = (query[:80] + "...") if len(query) > 80 else query
@@ -113,7 +117,7 @@ class TelemetryTracker:
             user_id=user_id,
             role=role,
             query_preview=query_preview,
-            created_at=round(start_time, 2),
+            created_at=round(time.time() - elapsed_seconds, 2),
             total_duration_ms=total_duration_ms,
             cache_hit=cache_hit,
             rewrite_count=rewrite_count,
@@ -139,7 +143,7 @@ class TelemetryTracker:
             url = f"{settings.LANGFUSE_HOST.rstrip('/')}/api/public/ingestion"
             events = [
                 {
-                    "id": f"trace_{record.trace_id}",
+                    "id": f"trace_{record.trace_id}_{uuid.uuid4()}",
                     "type": "trace-create",
                     "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(record.created_at)),
                     "body": {

@@ -12,7 +12,7 @@ VECTOR_SIZE = 384  # FastEmbed BAAI/bge-small-en-v1.5 vector dimension
 qdrant_url = settings.QDRANT_URL.strip() if settings.QDRANT_URL else None
 
 if qdrant_url:
-    logger.info(f"Connecting to Qdrant Cloud Cluster via URL")
+    logger.info("Connecting to Qdrant Cloud Cluster via URL")
     qdrant_client = AsyncQdrantClient(
         url=qdrant_url, 
         api_key=settings.QDRANT_API_KEY or None

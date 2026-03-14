@@ -153,6 +153,26 @@ async def get_tenant_document_usage(tenant_id: str) -> tuple[int, int]:
             return int(row["document_count"]), int(row["storage_bytes"])
 
 
+async def get_tenant_document_id(tenant_id: str, filename: str) -> Optional[str]:
+    """Return the current document ID for a tenant-scoped filename, if present."""
+    if pool is None:
+        return None
+    async with pool.connection() as connection:
+        async with connection.cursor() as cursor:
+            await cursor.execute(
+                """
+                SELECT id::text AS id
+                FROM documents
+                WHERE tenant_id = %s AND filename = %s AND deleted_at IS NULL
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (tenant_id, filename),
+            )
+            row = await cursor.fetchone()
+            return str(row["id"]) if row else None
+
+
 @asynccontextmanager
 async def get_checkpointer() -> AsyncGenerator[AsyncPostgresSaver, None]:
     """Yield an active AsyncPostgresSaver instance using a pooled connection."""
@@ -250,14 +270,16 @@ async def delete_thread_history(thread_id: str) -> None:
     try:
         async with pool.connection() as connection:
             async with connection.cursor() as cursor:
-                for table in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
+                delete_queries = (
+                    "DELETE FROM checkpoint_writes WHERE thread_id = %s",
+                    "DELETE FROM checkpoint_blobs WHERE thread_id = %s",
+                    "DELETE FROM checkpoints WHERE thread_id = %s",
+                )
+                for query in delete_queries:
                     try:
-                        await cursor.execute(
-                            f"DELETE FROM {table} WHERE thread_id = %s",
-                            (thread_id,),
-                        )
+                        await cursor.execute(query, (thread_id,))
                     except Exception as table_err:
-                        logger.debug(f"Could not purge {table} for thread {thread_id}: {table_err}")
+                        logger.debug("Could not purge checkpoint table for thread %s: %s", thread_id, table_err)
         logger.info(f"Successfully purged checkpoint history for thread '{thread_id}'")
     except Exception as err:
         logger.warning(f"Failed to delete thread checkpoints for {thread_id}: {err}")
@@ -271,14 +293,16 @@ async def delete_all_tenant_user_history(tenant_id: str, user_id: Optional[str] 
     try:
         async with pool.connection() as connection:
             async with connection.cursor() as cursor:
-                for table in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
+                delete_queries = (
+                    "DELETE FROM checkpoint_writes WHERE thread_id LIKE %s",
+                    "DELETE FROM checkpoint_blobs WHERE thread_id LIKE %s",
+                    "DELETE FROM checkpoints WHERE thread_id LIKE %s",
+                )
+                for query in delete_queries:
                     try:
-                        await cursor.execute(
-                            f"DELETE FROM {table} WHERE thread_id LIKE %s",
-                            (prefix,),
-                        )
+                        await cursor.execute(query, (prefix,))
                     except Exception as table_err:
-                        logger.debug(f"Could not purge {table} with prefix {prefix}: {table_err}")
+                        logger.debug("Could not purge checkpoint table with prefix %s: %s", prefix, table_err)
         logger.info(f"Purged all checkpoint history for prefix '{prefix}'")
     except Exception as err:
         logger.warning(f"Failed to delete checkpoint history for tenant {tenant_id}: {err}")
