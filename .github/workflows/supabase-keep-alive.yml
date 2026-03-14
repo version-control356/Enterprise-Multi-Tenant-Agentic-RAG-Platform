@@ -1,0 +1,17 @@
+name: Keep Supabase Awake
+
+on:
+  schedule:
+    # Runs at 00:00 UTC every 4 days to safely beat the 7-day inactivity limit
+    - cron: '0 0 */4 * *'
+  workflow_dispatch: # Allows you to manually trigger it for testing
+
+jobs:
+  ping-db:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Ping to Supabase API
+        run: |
+          curl -i -X GET "${{ secrets.SUPABASE_URL }}/rest/v1/" \
+          -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+          -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
