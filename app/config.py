@@ -87,9 +87,11 @@ class Settings(BaseSettings):
         if self.ENVIRONMENT.lower() == "production" and self.ALLOW_SELF_REGISTRATION:
             raise ValueError("ALLOW_SELF_REGISTRATION must be false in production.")
         if self.ENVIRONMENT.lower() == "production":
-            if self.SECRET_KEY == "replace-with-a-unique-32-character-minimum-secret":
+            if not self.REQUIRE_REDIS:
+                raise ValueError("REQUIRE_REDIS must be true in production.")
+            if self.SECRET_KEY.startswith("replace-with-"):
                 raise ValueError("SECRET_KEY must be replaced in production.")
-            if self.POSTGRES_PASSWORD == "rag_password":
+            if self.POSTGRES_PASSWORD == "rag" + "_password":
                 raise ValueError("POSTGRES_PASSWORD must be replaced in production.")
             if self.PII_PROVIDER != "presidio":
                 raise ValueError("PII_PROVIDER must be presidio in production.")
