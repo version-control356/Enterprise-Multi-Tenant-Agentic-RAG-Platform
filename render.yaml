@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: enterprise-multi-tenant-agentic-rag
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /ready
+    autoDeploy: true
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: REQUIRE_REDIS
+        value: "true"
+      - key: PII_PROVIDER
+        value: presidio
+      - key: PROMPT_GUARDRAILS_PROVIDER
+        value: regex
+      - key: PORT
+        value: "8000"
+      - key: SECRET_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: POSTGRES_USER
+        sync: false
+      - key: POSTGRES_PASSWORD
+        sync: false
+      - key: POSTGRES_DB
+        sync: false
+      - key: POSTGRES_HOST
+        sync: false
+      - key: POSTGRES_PORT
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false

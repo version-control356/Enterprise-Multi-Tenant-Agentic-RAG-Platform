@@ -1,13 +1,13 @@
 # 🏛️ Architectural Specification: Enterprise Multi-Tenant Agentic RAG Platform
 
-> **Document Version:** 2.2  
+> **Document Version:** 2.3
 > **Target Audience:** Enterprise Solutions Architects, Staff AI Engineers, Security Reviewers, and Site Reliability Engineers (SREs).
 
 ---
 
 ## 1. System Topology & Request Path
 
-The platform utilizes a modular service topology composed of an API Gateway, an Agentic State Machine, a Vector Database, a Redis cache and job queue, a relational state store, and an Operator Interface. Docker Compose is the supported local runtime; Kubernetes manifests are an optional scaling reference.
+The platform utilizes a modular service topology composed of an API Gateway, an Agentic State Machine, a Vector Database, a Redis cache and job queue, a relational state store, and an Operator Interface. Docker Compose and the root Dockerfile are the supported deployment paths; `render.yaml` provides a declarative Render web-service configuration.
 
 ```text
 +───────────────────────────────────────────────────────────────────────────────────────────+
@@ -108,6 +108,7 @@ Security in this platform is implemented via a multi-layered cryptographic and l
 * Users are identified by the composite primary key:
   $$\text{Primary Key} = (\text{tenant\_id}, \text{username})$$
 * Cross-tenant provisioning is strictly rejected at the route handler level with `HTTP 403 Forbidden` if a tenant administrator attempts to create a user outside their assigned `tenant_id`.
+* Local authentication locks a tenant user after repeated failures, resets the counter after a successful login, checks `is_active` on every token request, and supports access-token revocation through Redis-backed logout. MFA and refresh-token endpoints are not implemented.
 
 ### B. Vector Database Isolation (Qdrant)
 * Ingested document chunks are stored with metadata payloads:
@@ -258,7 +259,7 @@ The platform implements an end-to-end multi-layered defense pipeline against LLM
 [ API Gateway: Request End ]   ──► Finalizes Trace Record ──► Local Ring Buffer & Langfuse Ingestion API
 ```
 
-* **Local In-Memory Tracker:** Retains a circular buffer of 500 traces for instant query via `/api/v1/telemetry/traces` and the Streamlit UI.
+* **Local In-Memory Tracker:** Retains a circular buffer of 500 traces for instant query via `/api/v1/telemetry/traces` and the Streamlit UI. Trace deletion is admin-only.
 * **Langfuse Export:** When `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are provided, the tracker asynchronously exports trace and span batches using Langfuse's REST API with tenant and role tagging.
 
 ---
@@ -303,7 +304,7 @@ not required at runtime.
 ```
 
 * **Synchronous Ingestion (`POST /api/v1/ingest`):** Best for standard documents (< 10 MB).
-* **Asynchronous Ingestion (`POST /api/v1/ingest/async`):** Stores the payload in Redis and enqueues a job. A backend worker claims jobs with processing retention, avoiding HTTP gateway timeouts and allowing replica consumers.
+* **Asynchronous Ingestion (`POST /api/v1/ingest/async`):** Stores the payload in Redis and enqueues a job. A backend worker claims jobs with a lease, acknowledges success or failure, and requeues stale processing jobs after a crash.
 * **Ingestion Status Polling (`GET /api/v1/ingest/status/{task_id}`):** Reports `status: "processing" | "completed" | "failed"` with chunk counts and error details.
 
 ### Operational limits and verified facts
@@ -317,7 +318,6 @@ not required at runtime.
 | In-memory trace history | 500 traces |
 | Local backend workers | 1, to avoid duplicate model memory |
 | Local orchestration | Docker Compose with PostgreSQL, Redis, Qdrant, FastAPI, and Streamlit |
-| Optional orchestration | Kubernetes manifests with 3 backend and 2 frontend replicas as a deployment reference |
 
 These are configuration and architecture values, not throughput guarantees. Latency and retrieval quality must be measured with the evaluation harness on the target hardware and provider configuration.
 

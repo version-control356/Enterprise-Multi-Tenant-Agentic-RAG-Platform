@@ -20,6 +20,7 @@ This platform is engineered to solve the most critical enterprise challenges in 
 | :--- | :--- | :--- |
 | **Multi-Tenant Isolation** | Composite key `(tenant_id, username)` in PostgreSQL + Mandatory metadata filters in Qdrant | **Zero cross-tenant data leakage** at database, vector, and cache layers. |
 | **Granular RBAC** | Role-filtered retrieval (`admin`, `analyst`, `viewer`) | Restricted users cannot retrieve confidential chunks even within the same tenant. |
+| **Credential Lifecycle** | Tenant-scoped failed-login lockout/reset, active-user checks, and Redis-backed access-token revocation via `/auth/logout` | Limits brute-force attempts without account-enumeration details; revoked tokens stop working across replicas when Redis is available. |
 | **Defensive AI & NeMo Guardrails** | **NVIDIA NeMo Guardrails** (Colang input/output rails) + OWASP injection regexes + **Presidio PII Redaction** | Malicious prompts are blocked and PII is redacted **before** touching downstream LLMs or vector stores. |
 | **Hybrid Search (Dense + Sparse)** | FastEmbed BGE (`384d`) + BM25 Sparse Tokenizer + Qdrant Reciprocal Rank Fusion (RRF) | Superior retrieval accuracy for both semantic intent and exact hardware SKUs / legal codes. |
 | **Cross-Encoder Reranking** | **Cohere Rerank API** (`rerank-v3.5`) cross-encoder re-ordering | Re-scores hybrid retrieval candidates with high semantic precision before passing to LLM. |
@@ -164,21 +165,24 @@ docker compose up --build -d
 | **FastAPI Gateway** | `http://localhost:8000/docs` | Interactive Swagger API documentation |
 | **Readiness Probe** | `http://localhost:8000/ready` | Orchestrator health check (PostgreSQL, Qdrant, Redis) |
 
-### Local versus Kubernetes deployment
+### Docker deployment
 
-Docker Compose is the supported local deployment for this repository. It runs one backend worker locally to avoid loading duplicate embedding models into memory. The `deploy/k8s/` manifests are an optional production reference for teams that need replica scaling, rolling updates, and autoscaling; Kubernetes is not required for the current project size.
+Docker Compose is the supported deployment for this repository. It runs one backend worker locally to avoid loading duplicate embedding models into memory. The root `Dockerfile` also runs the FastAPI service on the platform-provided `PORT` for container hosts such as Render.
 
-The primary answer-generation model is **Groq Cloud `openai/gpt-oss-20b`**. NeMo Guardrails is enabled in the active environment and uses a separate `gpt-4o-mini` evaluator for self-check rails; it is not the primary generation model. The configured NeMo provider must have access to its model credentials.
+The primary answer-generation model is **Groq Cloud `openai/gpt-oss-20b`**. NeMo Guardrails is optional by configuration and, when enabled, uses a separate evaluator; it is not the primary generation model. The configured NeMo provider must have access to its model credentials. MFA and refresh-token flows are not exposed by the current API.
 
-### Free hosted demo deployment
+### External hosting
 
-For a small portfolio demo, use **Streamlit Community Cloud** for the frontend and **Render or Railway** for the FastAPI backend. These platforms may sleep, cold-start, or enforce monthly usage limits on free tiers, so this is a demo deployment rather than a high-availability production environment.
+For a small demo, use **Streamlit Community Cloud** for the frontend and a container host such as **Render** for the FastAPI backend. This repository does not provision external services or verify hosted accounts; platforms may sleep, cold-start, or enforce usage limits.
 
 1. Deploy the repository to Streamlit Community Cloud with the entrypoint `frontend/app.py`.
-2. Add `API_BASE_URL=https://<your-backend-domain>/api/v1` to Streamlit secrets or environment variables.
-3. Deploy the repository to Render or Railway using the root `Dockerfile`. Its default command reads the platform `PORT` variable.
+2. Add `API_BASE_URL=https://<your-backend-domain>/api/v1` to Streamlit secrets or environment variables. The frontend accepts either a host URL or a URL already ending in `/api/v1` and normalizes it once.
+3. Deploy the repository to Render using the included `render.yaml` Blueprint, or configure a Docker web service manually with the root `Dockerfile` and health check `/ready`. The image reads the platform `PORT` variable. Streamlit dependencies are listed separately in `frontend/requirements.txt`.
 4. Configure the backend with hosted PostgreSQL, Redis, and Qdrant endpoints. Neon or Supabase can provide PostgreSQL, Upstash can provide Redis, and Qdrant Cloud can provide vector storage where their current free plans are available. For Upstash set `REDIS_URL=rediss://...`; for Qdrant Cloud set `QDRANT_URL=https://...` and `QDRANT_API_KEY=...`. These URL settings take precedence over local host/port settings.
 5. Set `CORS_ORIGINS` to the exact Streamlit app URL and configure all model, authentication, database, and guardrail secrets in the backend platform. Never commit `.env` or provider keys.
+6. After changing backend URLs or external dashboard credentials, update the platform environment variables and redeploy. Langfuse and other external dashboards require their own environment variables.
+
+For production, set `REQUIRE_REDIS=true`. If Redis is unavailable, rate-limited requests are blocked rather than allowed through. Development keeps `REQUIRE_REDIS=false` so the application can run without Redis, with caching and rate limiting disabled until it recovers.
 
 The free hosted stack requires external service accounts and may not remain completely cost-free if usage exceeds provider quotas. Verify current free-tier limits before deployment.
 
@@ -190,10 +194,10 @@ The platform includes a unit and regression test suite verifying tenant boundari
 
 ```bash
 # Run unit tests
-python -m unittest discover tests
+python -m pytest -q
 
 # Output:
-# Ran 22 tests in 0.04s - OK
+# 22 passed
 ```
 
 ### Reproducible RAG evaluation
@@ -285,7 +289,7 @@ Every request automatically creates a distributed trace containing detailed sub-
 }
 ```
 
-* View live trace breakdowns and P95 latency percentiles directly inside the **Streamlit UI** or query `/api/v1/telemetry/traces`.
+* View live trace breakdowns and P95 latency percentiles directly inside the **Streamlit UI** or query `/api/v1/telemetry/traces`. Trace deletion is restricted to tenant administrators.
 * Set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` to seamlessly stream traces to **Langfuse Cloud** or self-hosted Langfuse.
 
 ---

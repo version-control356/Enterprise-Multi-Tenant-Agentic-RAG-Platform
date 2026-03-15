@@ -38,6 +38,15 @@ jobs:
       - name: Dependency Consistency Check
         run: python -m pip check
 
+      - name: Run Ruff
+        run: ruff check app frontend tests scripts
+
+      - name: Run Bandit
+        run: bandit -q -r app frontend scripts
+
+      - name: Run pip-audit
+        run: pip-audit -r requirements.txt --progress-spinner off
+
       - name: Validate Docker Compose configuration
         shell: bash
         run: |
@@ -53,8 +62,7 @@ jobs:
         with:
           image-ref: multi-tenant-rag:test
           format: table
-          exit-code: 0
+          exit-code: 1
           ignore-unfixed: true
           vuln-type: os,library
           severity: CRITICAL,HIGH
-
