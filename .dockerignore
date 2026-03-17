@@ -7,7 +7,7 @@ __pycache__/
 *.md
 .git/
 .github/
-*.yml
+docker-compose*.yml
 tests/
 docs/
 *.ipynb

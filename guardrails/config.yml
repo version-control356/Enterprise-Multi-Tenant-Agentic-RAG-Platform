@@ -1,0 +1,22 @@
+# NeMo uses Groq's OpenAI-compatible endpoint for the lightweight safety check.
+models:
+  - type: main
+    engine: openai
+    model: openai/gpt-oss-20b
+    api_key_env_var: GROQ_API_KEY
+    parameters:
+      base_url: https://api.groq.com/openai/v1
+      temperature: 0.0
+      max_tokens: 32
+
+rails:
+  input:
+    flows:
+      - self check input
+  output:
+    flows:
+      - self check output
+
+  dialog:
+    single_call:
+      enabled: false

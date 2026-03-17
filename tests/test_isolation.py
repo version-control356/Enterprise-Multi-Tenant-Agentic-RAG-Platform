@@ -2,7 +2,7 @@
 
 import unittest
 
-from app.api.routes import build_chat_cache_key
+from app.api.routes import build_backend_thread_id, build_backend_thread_scope, build_chat_cache_key
 from app.config import Settings
 
 
@@ -25,6 +25,15 @@ class IsolationTests(unittest.TestCase):
         self.assertNotEqual(base, other_user)
         self.assertNotEqual(base, other_thread)
         self.assertNotEqual(base, other_version)
+
+    def test_thread_history_prefix_is_scoped_to_one_tenant_user(self) -> None:
+        """Bulk history deletion must match only the caller's hashed thread namespace."""
+        alice_prefix = build_backend_thread_scope("tenant-a", "alice")
+        bob_prefix = build_backend_thread_scope("tenant-a", "bob")
+        alice_thread = build_backend_thread_id("tenant-a", "alice", "thread-1")
+
+        self.assertNotEqual(alice_prefix, bob_prefix)
+        self.assertTrue(alice_thread.startswith(alice_prefix[:-1]))
 
     def test_jwt_algorithm_is_restricted(self) -> None:
         """Reject unsafe or unsupported JWT algorithm configuration."""

@@ -2,6 +2,8 @@
 
 import asyncio
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
 from app.core.rerank import rerank_documents_with_cohere
 from app.agents.graph import grade_documents_node, AgentState
@@ -73,6 +75,43 @@ class EnhancementTests(unittest.TestCase):
             "error": None,
         }
         self.assertEqual(_ingestion_tasks[task_id]["status"], "processing")
+
+    def test_new_document_ingestion_keeps_newly_upserted_vectors(self) -> None:
+        """A first upload must not delete its own Qdrant points during replacement cleanup."""
+        from app.api import routes
+
+        vector = SimpleNamespace(tolist=lambda: [0.1, 0.2])
+        sparse_vector = SimpleNamespace(
+            indices=SimpleNamespace(tolist=lambda: [1]),
+            values=SimpleNamespace(tolist=lambda: [0.5]),
+        )
+        upsert = AsyncMock()
+        delete = AsyncMock()
+        with (
+            patch.object(routes.UniversalDocumentParser, "extract_text", return_value="policy text"),
+            patch.object(routes.UniversalDocumentParser, "chunk_document", return_value=["policy text"]),
+            patch.object(routes, "get_tenant_document_usage", new=AsyncMock(return_value=(0, 0))),
+            patch.object(routes, "get_tenant_document_id", new=AsyncMock(return_value=None)),
+            patch.object(routes, "upsert_documents_to_qdrant", new=upsert),
+            patch.object(routes, "delete_documents_from_qdrant", new=delete),
+            patch.object(routes, "record_document", new=AsyncMock()),
+            patch.object(routes, "bump_tenant_cache_version", new=AsyncMock()),
+            patch.object(routes, "get_embedding_model", return_value=Mock(embed=lambda _: [vector])),
+            patch.object(routes, "get_sparse_embedding_model", return_value=Mock(embed=lambda _: [sparse_vector])),
+        ):
+            result = asyncio.run(
+                routes._process_document_ingestion(
+                    content=b"policy text",
+                    filename="policy.txt",
+                    allowed_roles="admin",
+                    tenant_id="tenant-a",
+                    user_id="alice",
+                )
+            )
+
+        self.assertEqual(result["status"], "success")
+        upsert.assert_awaited_once()
+        delete.assert_not_awaited()
 
     def test_clear_telemetry_traces(self) -> None:
         """Clearing telemetry traces should remove recorded records for tenant."""

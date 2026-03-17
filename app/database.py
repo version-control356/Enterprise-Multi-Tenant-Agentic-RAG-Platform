@@ -192,6 +192,8 @@ async def record_document(
     chunks_count: int,
     created_by: str,
     allowed_roles: str = "admin",
+    max_documents: Optional[int] = None,
+    max_storage_bytes: Optional[int] = None,
 ) -> None:
     """Insert or update a document tracking record in PostgreSQL with role permissions."""
     if pool is None:
@@ -199,6 +201,27 @@ async def record_document(
 
     async with pool.connection() as connection:
         async with connection.cursor() as cursor:
+            if max_documents is not None or max_storage_bytes is not None:
+                await cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (tenant_id,))
+                await cursor.execute(
+                    """
+                    SELECT COUNT(*) AS document_count, COALESCE(SUM(size_bytes), 0) AS storage_bytes,
+                           COALESCE(MAX(size_bytes) FILTER (WHERE filename = %s), 0) AS replaced_size
+                    FROM documents
+                    WHERE tenant_id = %s AND deleted_at IS NULL
+                    """,
+                    (filename, tenant_id),
+                )
+                usage = await cursor.fetchone()
+                document_count = int(usage["document_count"])
+                storage_bytes = int(usage["storage_bytes"])
+                replaced_size = int(usage["replaced_size"])
+                resulting_count = document_count if replaced_size else document_count + 1
+                resulting_storage = storage_bytes - replaced_size + size_bytes
+                if max_documents is not None and resulting_count > max_documents:
+                    raise ValueError("The tenant document quota has been reached.")
+                if max_storage_bytes is not None and resulting_storage > max_storage_bytes:
+                    raise ValueError("The tenant storage quota has been reached.")
             await cursor.execute(
                 """
                 DELETE FROM documents WHERE tenant_id = %s AND filename = %s
@@ -285,11 +308,10 @@ async def delete_thread_history(thread_id: str) -> None:
         logger.warning(f"Failed to delete thread checkpoints for {thread_id}: {err}")
 
 
-async def delete_all_tenant_user_history(tenant_id: str, user_id: Optional[str] = None) -> None:
-    """Purge all LangGraph checkpointer history for a tenant (and optionally user)."""
+async def delete_all_tenant_user_history(thread_prefix: str) -> None:
+    """Purge all LangGraph checkpointer history matching a trusted thread prefix."""
     if pool is None:
         return
-    prefix = f"{tenant_id}_{user_id}_%" if user_id else f"{tenant_id}_%"
     try:
         async with pool.connection() as connection:
             async with connection.cursor() as cursor:
@@ -300,12 +322,12 @@ async def delete_all_tenant_user_history(tenant_id: str, user_id: Optional[str] 
                 )
                 for query in delete_queries:
                     try:
-                        await cursor.execute(query, (prefix,))
+                        await cursor.execute(query, (thread_prefix,))
                     except Exception as table_err:
-                        logger.debug("Could not purge checkpoint table with prefix %s: %s", prefix, table_err)
-        logger.info(f"Purged all checkpoint history for prefix '{prefix}'")
+                        logger.debug("Could not purge checkpoint table with prefix %s: %s", thread_prefix, table_err)
+        logger.info("Purged all checkpoint history for prefix '%s'", thread_prefix)
     except Exception as err:
-        logger.warning(f"Failed to delete checkpoint history for tenant {tenant_id}: {err}")
+        logger.warning("Failed to delete checkpoint history for prefix %s: %s", thread_prefix, err)
 
 
 async def delete_tenant_document(tenant_id: str, doc_id: str) -> Optional[str]:

@@ -14,7 +14,9 @@ services:
       - key: PII_PROVIDER
         value: presidio
       - key: PROMPT_GUARDRAILS_PROVIDER
-        value: regex
+        value: nemo
+      - key: NEMO_CHECK_MODE
+        value: suspicious
       - key: PORT
         value: "8000"
       - key: SECRET_KEY

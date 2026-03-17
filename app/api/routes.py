@@ -103,6 +103,13 @@ def build_chat_cache_key(
 
 def build_backend_thread_id(tenant_id: str, user_id: str, thread_id: str) -> str:
     """Create an unambiguous checkpointer identifier for a tenant/user/thread tuple."""
+    scope_digest = hashlib.sha256(
+        json.dumps(
+            [tenant_id, user_id],
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
     digest = hashlib.sha256(
         json.dumps(
             [tenant_id, user_id, thread_id],
@@ -110,7 +117,19 @@ def build_backend_thread_id(tenant_id: str, user_id: str, thread_id: str) -> str
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
-    return f"thread:{digest}"
+    return f"thread:{scope_digest}:{digest}"
+
+
+def build_backend_thread_scope(tenant_id: str, user_id: str) -> str:
+    """Return the checkpointer prefix for every conversation owned by one user."""
+    scope_digest = hashlib.sha256(
+        json.dumps(
+            [tenant_id, user_id],
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return f"thread:{scope_digest}:%"
 
 
 async def enforce_rate_limit(
@@ -357,7 +376,15 @@ async def _process_document_ingestion(
             chunks_count=len(chunks),
             created_by=user_id,
             allowed_roles=",".join(roles_list),
+            max_documents=settings.MAX_DOCUMENTS_PER_TENANT,
+            max_storage_bytes=settings.MAX_STORAGE_BYTES_PER_TENANT,
         )
+    except ValueError:
+        try:
+            await delete_documents_from_qdrant(tenant_id, doc_id=doc_id)
+        except Exception:
+            logger.exception("Compensating Qdrant cleanup failed for document %s.", doc_id)
+        raise
     except Exception:
         try:
             await delete_documents_from_qdrant(tenant_id, doc_id=doc_id)
@@ -369,8 +396,6 @@ async def _process_document_ingestion(
     try:
         if previous_doc_id:
             await delete_documents_from_qdrant(tenant_id, doc_id=previous_doc_id)
-        else:
-            await delete_documents_from_qdrant(tenant_id, filename=filename)
     except Exception as error:
         logger.exception("Qdrant replacement cleanup failed for document %s.", doc_id)
         raise RuntimeError(
@@ -431,7 +456,7 @@ async def _run_async_ingestion(
             "status": "failed",
             "filename": filename,
             "chunks_ingested": 0,
-            "error": str(error),
+            "error": "Document ingestion failed. Review server logs or retry the upload.",
             "timestamp": time.time(),
             "tenant_id": tenant_id,
             "user_id": user_id,
@@ -885,7 +910,9 @@ async def clear_all_chat_history(
     current_user: TokenData = Depends(get_current_tenant_user),
 ) -> dict[str, str]:
     """Clear all checkpointer conversation history across all sessions for the authenticated user."""
-    await delete_all_tenant_user_history(current_user.tenant_id, current_user.user_id)
+    await delete_all_tenant_user_history(
+        build_backend_thread_scope(current_user.tenant_id, current_user.user_id)
+    )
     await bump_tenant_cache_version(current_user.tenant_id)
     return {"status": "cleared", "tenant_id": current_user.tenant_id, "user_id": current_user.user_id}
 

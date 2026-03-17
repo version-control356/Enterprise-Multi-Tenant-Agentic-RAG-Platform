@@ -21,6 +21,11 @@ st.set_page_config(
 
 _raw_api_url = os.getenv("API_BASE_URL", "").strip().rstrip("/")
 if not _raw_api_url:
+    try:
+        _raw_api_url = str(st.secrets.get("API_BASE_URL", "")).strip().rstrip("/")
+    except Exception:
+        logger.debug("Streamlit secrets are unavailable; using the local API default.")
+if not _raw_api_url:
     _raw_api_url = "http://localhost:8000/api/v1"
 
 if not _raw_api_url.endswith("/api/v1"):
@@ -30,15 +35,6 @@ if not _raw_api_url.endswith("/api/v1"):
         API_BASE_URL = f"{_raw_api_url}/api/v1"
 else:
     API_BASE_URL = _raw_api_url
-
-try:
-   
-    if "localhost" in st.get_option("browser.serverAddress") or "127.0.0.1" in st.get_option("browser.serverAddress"):
-        API_BASE_URL = "http://localhost:8000/api/v1"
-except Exception:
-    API_BASE_URL = _raw_api_url
-
-
 
 def api_endpoint(path: str) -> str:
     """Safely build absolute API URLs without double slashes or missing prefix."""
@@ -158,19 +154,28 @@ with st.sidebar:
 
         if login_submitted:
             try:
-                with st.spinner("Authenticating..."):
-                    if response.is_success:
-                            token = response.json()["access_token"]
-                            claims = parse_jwt_claims(token)
-                            st.session_state.jwt_token = token
-                            st.session_state.tenant_id = login_tenant_id
-                            st.session_state.username = claims.get("sub", login_username)
-                            st.session_state.user_role = claims.get("role", "admin")
-                            st.session_state.messages = []
-                            fetch_tenant_documents()
-                            st.rerun()
-                        else:
-                            st.error("❌ Invalid credentials or tenant ID.")
+                auth_resp = httpx.post(
+                    api_endpoint("auth/token"),
+                    data={
+                        "username": login_username,
+                        "password": login_password,
+                        "tenant_id": login_tenant_id,
+                    },
+                    timeout=REQUEST_TIMEOUT,
+                    follow_redirects=True,
+                )
+                if auth_resp.is_success:
+                    token = auth_resp.json()["access_token"]
+                    claims = parse_jwt_claims(token)
+                    st.session_state.jwt_token = token
+                    st.session_state.tenant_id = login_tenant_id
+                    st.session_state.username = claims.get("sub", login_username)
+                    st.session_state.user_role = claims.get("role", "admin")
+                    st.session_state.messages = []
+                    fetch_tenant_documents()
+                    st.rerun()
+                else:
+                    st.error("❌ Invalid credentials or tenant ID.")
             except httpx.HTTPError as error:
                 st.error(f"⚠️ Backend unavailable: {error}")
     else:
