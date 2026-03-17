@@ -29,6 +29,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
+      - name: Install security tools
+        run: |
+          pip install ruff bandit pip-audit
+
       - name: Compile Python sources (Syntax Check)
         run: python -m compileall -q app frontend tests
 

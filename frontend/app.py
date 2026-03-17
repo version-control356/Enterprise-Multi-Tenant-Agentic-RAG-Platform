@@ -159,23 +159,18 @@ with st.sidebar:
         if login_submitted:
             try:
                 with st.spinner("Authenticating..."):
-                    response = httpx.post(
-                        api_endpoint("auth/token"),
-                        data={"username": login_username, "password": login_password, "tenant_id": login_tenant_id},
-                        timeout=REQUEST_TIMEOUT,
-                        follow_redirects=True,
-                    )
-                if response.is_success:
-                    token = response.json()["access_token"]
-                    claims = parse_jwt_claims(token)
-                    st.session_state.jwt_token = token
-                    st.session_state.tenant_id = login_tenant_id
-                    st.session_state.username = claims.get("sub", login_username)
-                    st.session_state.user_role = claims.get("role", "admin")
-                    st.session_state.messages = []
-                    fetch_tenant_documents()
-                    st.rerun()
-                st.error("❌ Invalid credentials or tenant ID.")
+                    if response.is_success:
+                            token = response.json()["access_token"]
+                            claims = parse_jwt_claims(token)
+                            st.session_state.jwt_token = token
+                            st.session_state.tenant_id = login_tenant_id
+                            st.session_state.username = claims.get("sub", login_username)
+                            st.session_state.user_role = claims.get("role", "admin")
+                            st.session_state.messages = []
+                            fetch_tenant_documents()
+                            st.rerun()
+                        else:
+                            st.error("❌ Invalid credentials or tenant ID.")
             except httpx.HTTPError as error:
                 st.error(f"⚠️ Backend unavailable: {error}")
     else:
