@@ -121,3 +121,4 @@ raw_documents/
 # Streamlit-specific ignored files.
 .streamlit/credentials.toml
 .streamlit/config.toml
+.aider*
