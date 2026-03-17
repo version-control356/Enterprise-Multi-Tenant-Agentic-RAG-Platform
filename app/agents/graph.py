@@ -73,7 +73,10 @@ async def retrieve_node(state: AgentState) -> dict:
             - ``available_documents``: List of document filenames the tenant can access.
     """
     trace_id = state.get("trace_id") or ""
-    user_query = _extract_query(state)
+    raw_query = _extract_query(state)
+    # Sanitize the incoming query for security and PII before any processing
+    sanitized_query = await SecurityGuardrails.sanitize_prompt_async(raw_query) if raw_query else ""
+    user_query = sanitized_query
     if not user_query.strip():
         return {"context": "", "is_relevant": False, "available_documents": []}
 
