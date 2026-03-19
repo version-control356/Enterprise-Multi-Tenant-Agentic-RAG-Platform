@@ -68,11 +68,7 @@ jobs:
         run: docker build -t multi-tenant-rag:test .
 
       - name: Run Trivy container vulnerability scanner
-        uses: aquasecurity/trivy-action@v0.30.0
-        with:
-          image-ref: multi-tenant-rag:test
-          format: table
-          exit-code: 1
-          ignore-unfixed: true
-          vuln-type: os
-          severity: CRITICAL,HIGH
+        shell: bash
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          trivy image --severity CRITICAL,HIGH --ignore-unfixed --pkg-types os multi-tenant-rag:test
