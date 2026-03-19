@@ -36,7 +36,7 @@ EXPOSE 8000 8501
 
 ENV PORT=8000
 
-HEALTHCHECK --interval=30s --timeout=5s CMD python -c "import os, urllib.request; urllib.request.urlopen(f'http://localhost:{os.getenv(\"PORT\", \"8000\")}/ready')"
+HEALTHCHECK --interval=30s --timeout=5s CMD python -c "import os, urllib.request; port=os.getenv('PORT', '8000'); path='/_stcore/health' if port=='8501' else '/ready'; urllib.request.urlopen(f'http://localhost:{port}{path}')"
 
 RUN useradd --create-home --shell /usr/sbin/nologin appuser && chown -R appuser:appuser /app
 USER appuser

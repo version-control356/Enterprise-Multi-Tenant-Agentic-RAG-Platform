@@ -171,20 +171,26 @@ Docker Compose is the supported deployment for this repository. It runs one back
 
 The primary answer-generation model is **Groq Cloud `openai/gpt-oss-20b`**. NeMo Guardrails is optional by configuration and, when enabled, uses a separate evaluator; it is not the primary generation model. The configured NeMo provider must have access to its model credentials. MFA and refresh-token flows are not exposed by the current API.
 
-### External hosting
+### External hosting & Cloud Deployment
 
-For a small demo, use **Streamlit Community Cloud** for the frontend and a container host such as **Render** for the FastAPI backend. This repository does not provision external services or verify hosted accounts; platforms may sleep, cold-start, or enforce usage limits.
+You can deploy the platform in either of two hosting models:
 
-1. Deploy the repository to Streamlit Community Cloud with the entrypoint `frontend/app.py`.
-2. Add `API_BASE_URL=https://<your-backend-domain>/api/v1` to Streamlit secrets or environment variables. The frontend accepts either a host URL or a URL already ending in `/api/v1` and normalizes it once.
-3. Deploy the repository to Render using the included `render.yaml` Blueprint, or configure a Docker web service manually with the root `Dockerfile` and health check `/ready`. The image reads the platform `PORT` variable. Streamlit dependencies are listed separately in `frontend/requirements.txt`.
-4. Configure the backend with hosted PostgreSQL, Redis, and Qdrant endpoints. Neon or Supabase can provide PostgreSQL, Upstash can provide Redis, and Qdrant Cloud can provide vector storage where their current free plans are available. For Upstash set `REDIS_URL=rediss://...`; for Qdrant Cloud set `QDRANT_URL=https://...` and `QDRANT_API_KEY=...`. These URL settings take precedence over local host/port settings.
-5. Set `CORS_ORIGINS` to the exact Streamlit app URL and configure all model, authentication, database, and guardrail secrets in the backend platform. Never commit `.env` or provider keys.
-6. After changing backend URLs or external dashboard credentials, update the platform environment variables and redeploy. Langfuse and other external dashboards require their own environment variables.
+#### Option A: Full-Stack on Render (Recommended Blueprint)
+The repository includes a multi-service [`render.yaml`](render.yaml) Blueprint that automatically provisions both the **FastAPI Backend Gateway** and the **Streamlit Frontend Operator UI** within the same Render environment:
+1. Connect your repository to Render as a **Blueprint**.
+2. Render automatically builds both services using the multi-stage [`Dockerfile`](Dockerfile).
+3. The frontend service automatically discovers and links to the backend via `API_BASE_URL` (`fromService: host`).
 
-For production, set `REQUIRE_REDIS=true`. If Redis is unavailable, rate-limited requests are blocked rather than allowed through. Development keeps `REQUIRE_REDIS=false` so the application can run without Redis, with caching and rate limiting disabled until it recovers.
+#### Option B: Decoupled (Streamlit Community Cloud + Render Backend)
+1. **Frontend**: Deploy the repository on **Streamlit Community Cloud** with entrypoint `frontend/app.py` and requirements file `frontend/requirements.txt`.
+2. **Backend**: Deploy on **Render** (or any container host) as a Docker web service using the root `Dockerfile` and readiness probe `/ready`.
+3. **Environment & Secrets Synchronization**:
+   - In Streamlit Cloud settings or secrets, configure `API_BASE_URL=https://<your-render-backend-domain>/api/v1` (the frontend automatically normalizes protocols and paths).
+   - In Render backend environment variables, set `CORS_ORIGINS=https://<your-streamlit-app>.streamlit.app`.
+   - Provide managed datastores (Neon/Supabase PostgreSQL `POSTGRES_*`, Upstash `REDIS_URL`, Qdrant Cloud `QDRANT_URL` + `QDRANT_API_KEY`).
+   - Configure model secrets (`GROQ_API_KEY`, `SECRET_KEY`, and optional `COHERE_API_KEY` / `LANGFUSE_*`).
 
-The free hosted stack requires external service accounts and may not remain completely cost-free if usage exceeds provider quotas. Verify current free-tier limits before deployment.
+For production environments, set `REQUIRE_REDIS=true`. The frontend includes live backend reachability and latency checks in the sidebar with automatic status notices during cold starts.
 
 ---
 
@@ -197,7 +203,7 @@ The platform includes a unit and regression test suite verifying tenant boundari
 python -m pytest -q
 
 # Output:
-# 22 passed
+# 24 passed
 ```
 
 ### Reproducible RAG evaluation

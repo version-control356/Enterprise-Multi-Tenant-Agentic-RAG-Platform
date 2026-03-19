@@ -28,6 +28,10 @@ if not _raw_api_url:
 if not _raw_api_url:
     _raw_api_url = "http://localhost:8000/api/v1"
 
+# Ensure scheme is present for cloud deployments (e.g. Render / Custom domains)
+if not _raw_api_url.startswith(("http://", "https://")):
+    _raw_api_url = f"https://{_raw_api_url}"
+
 if not _raw_api_url.endswith("/api/v1"):
     if _raw_api_url.endswith("/api"):
         API_BASE_URL = f"{_raw_api_url}/v1"
@@ -36,6 +40,7 @@ if not _raw_api_url.endswith("/api/v1"):
 else:
     API_BASE_URL = _raw_api_url
 
+
 def api_endpoint(path: str) -> str:
     """Safely build absolute API URLs without double slashes or missing prefix."""
     clean_path = path.lstrip("/")
@@ -43,6 +48,22 @@ def api_endpoint(path: str) -> str:
 
 
 REQUEST_TIMEOUT = httpx.Timeout(60.0, connect=5.0)
+
+
+@st.cache_data(ttl=15, show_spinner=False)
+def check_backend_connection() -> tuple[bool, str, float]:
+    """Test backend reachability and report latency."""
+    t0 = time.perf_counter()
+    try:
+        health_url = API_BASE_URL.replace("/api/v1", "/health")
+        resp = httpx.get(health_url, timeout=httpx.Timeout(4.0, connect=2.0))
+        latency = round((time.perf_counter() - t0) * 1000, 1)
+        if resp.is_success:
+            return True, "Online", latency
+        return False, f"HTTP {resp.status_code}", latency
+    except Exception:
+        latency = round((time.perf_counter() - t0) * 1000, 1)
+        return False, "Unreachable", latency
 
 st.markdown("""
 <style>
@@ -145,6 +166,13 @@ def fetch_tenant_documents():
 with st.sidebar:
     st.markdown("### 🛡️ Identity & Tenancy")
     
+    is_online, conn_status, ping_ms = check_backend_connection()
+    if is_online:
+        st.caption(f"🟢 **Backend**: `{API_BASE_URL}` ({ping_ms} ms)")
+    else:
+        st.caption(f"🔴 **Backend ({conn_status})**: `{API_BASE_URL}`")
+        st.info("💡 **Render Free Tier Notice**: Backend may be spinning up from sleep (~30s). Please wait a moment.")
+
     if not st.session_state.jwt_token:
         with st.form("login_form"):
             login_username = st.text_input("Username", value="admin_user")
@@ -177,7 +205,7 @@ with st.sidebar:
                 else:
                     st.error("❌ Invalid credentials or tenant ID.")
             except httpx.HTTPError as error:
-                st.error(f"⚠️ Backend unavailable: {error}")
+                st.error(f"⚠️ Backend unavailable: {error}. If deployed on Render, backend may be waking up.")
     else:
         role_class = f"badge-{st.session_state.user_role}" if st.session_state.user_role in ["admin", "analyst", "viewer"] else "badge-trace"
         safe_username = escape(str(st.session_state.username or ""))

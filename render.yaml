@@ -41,3 +41,20 @@ services:
         sync: false
       - key: CORS_ORIGINS
         sync: false
+
+  - type: web
+    name: enterprise-rag-frontend
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: streamlit run frontend/app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    healthCheckPath: /_stcore/health
+    autoDeploy: true
+    envVars:
+      - key: API_BASE_URL
+        fromService:
+          type: web
+          name: enterprise-multi-tenant-agentic-rag
+          property: host
+      - key: PORT
+        value: "8501"

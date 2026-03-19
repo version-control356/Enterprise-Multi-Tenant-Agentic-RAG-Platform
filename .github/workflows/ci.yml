@@ -68,7 +68,7 @@ jobs:
         run: docker build -t multi-tenant-rag:test .
 
       - name: Run Trivy container vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: multi-tenant-rag:test
           format: table
