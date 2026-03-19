@@ -81,23 +81,33 @@ class SecurityGuardrails:
     @staticmethod
     @lru_cache(maxsize=1)
     def _presidio_engines() -> tuple[_Analyzer, _Anonymizer]:
-        """Load Presidio engines only when the configured provider requires them."""
         try:
             from presidio_analyzer import AnalyzerEngine
+            from presidio_analyzer.nlp_engine import NlpEngineProvider
             from presidio_anonymizer import AnonymizerEngine
-        except ImportError as error:
-            raise RuntimeError(
-                "PII_PROVIDER=presidio requires presidio-analyzer and presidio-anonymizer."
-            ) from error
-        return cast(_Analyzer, AnalyzerEngine()), cast(_Anonymizer, AnonymizerEngine())
+
+            nlp_config = {
+                "nlp_engine_name": "spacy",
+                "models": [{"lang_code": "en", "model_name": "en_core_web_sm"}],
+            }
+            nlp_engine = NlpEngineProvider(nlp_configuration=nlp_config).create_engine()
+            analyzer = AnalyzerEngine(nlp_engine=nlp_engine)
+            anonymizer = AnonymizerEngine()
+            return cast(_Analyzer, analyzer), cast(_Anonymizer, anonymizer)
+        except Exception as error:
+            logger.warning("Presidio analyzer engine initialization failed: %s", error)
+            raise RuntimeError("PII_PROVIDER=presidio requires valid presidio configuration.") from error
 
     @staticmethod
     def _redact_with_presidio(text: str) -> str:
-        """Redact recognized PII using Presidio's analyzer and anonymizer."""
-        analyzer, anonymizer = SecurityGuardrails._presidio_engines()
-        results = analyzer.analyze(text=text, language="en")
-        result = anonymizer.anonymize(text=text, analyzer_results=results)
-        return result.text
+        try:
+            analyzer, anonymizer = SecurityGuardrails._presidio_engines()
+            results = analyzer.analyze(text=text, language="en")
+            result = anonymizer.anonymize(text=text, analyzer_results=results)
+            return result.text
+        except Exception as exc:
+            logger.warning("Presidio redaction fallback to fast regex: %s", exc)
+            return SecurityGuardrails.redact_pii_fast(text)
 
     @staticmethod
     @lru_cache(maxsize=1)

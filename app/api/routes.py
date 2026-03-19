@@ -504,9 +504,12 @@ async def run_ingestion_worker() -> None:
                 await acknowledge_ingestion_job(job)
         except asyncio.CancelledError:
             raise
-        except Exception:
-            logger.exception("Ingestion worker iteration failed.")
-            await asyncio.sleep(1)
+        except (TimeoutError, asyncio.TimeoutError, ConnectionError) as err:
+            logger.debug("Ingestion worker timeout: %s", err)
+            await asyncio.sleep(2)
+        except Exception as error:
+            logger.warning("Ingestion worker iteration retry: %s", error)
+            await asyncio.sleep(2)
 
 
 @router.post("/ingest")

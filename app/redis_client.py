@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import json
 import base64
@@ -166,11 +167,15 @@ async def claim_ingestion_job(timeout_seconds: int = 3) -> Optional[dict[str, An
         if settings.REQUIRE_REDIS:
             raise
         logger.warning("Unable to reclaim stale ingestion jobs in development: %s", error)
-    raw_job = await redis_client.brpoplpush(
-        INGESTION_QUEUE,
-        INGESTION_PROCESSING_QUEUE,
-        timeout=timeout_seconds,
-    )
+    try:
+        raw_job = await redis_client.brpoplpush(
+            INGESTION_QUEUE,
+            INGESTION_PROCESSING_QUEUE,
+            timeout=timeout_seconds,
+        )
+    except (redis.exceptions.TimeoutError, TimeoutError, asyncio.TimeoutError, ConnectionError, Exception) as err:
+        logger.debug("Redis claim_ingestion_job timeout/disconnect: %s", err)
+        return None
     if not raw_job:
         return None
     try:
