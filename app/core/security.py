@@ -39,7 +39,6 @@ class _Rails(Protocol):
         """Run configured rails asynchronously."""
         raise NotImplementedError
 
-# Comprehensive OWASP LLM Prompt Injection & Jailbreak Signatures
 INJECTION_PATTERNS = [
     r"ignore\s+(all\s+)?(previous|prior)\s+instructions",
     r"system\s+prompt\s+(override|leak|reveal|dump)",
@@ -54,7 +53,6 @@ INJECTION_PATTERNS = [
     r"\[/INST\]",
 ]
 
-# Sensitive PII & Secret token redaction regexes
 EMAIL_REGEX = r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+"
 PHONE_REGEX = r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b"
 SSN_REGEX = r"\b\d{3}-\d{2}-\d{4}\b"

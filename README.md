@@ -141,7 +141,7 @@ Edit `.env` and set your secrets:
 ```env
 SECRET_KEY="generate-a-secure-random-32-char-secret-key"
 GROQ_API_KEY="gsk_your_groq_api_key_here"
-GROQ_MODEL="openai/gpt-oss-20b"
+GROQ_MODEL="llama-3.3-70b-versatile"
 
 BOOTSTRAP_ADMIN_USERNAME="admin_user"
 BOOTSTRAP_ADMIN_PASSWORD="your-strong-password-under-72-characters"
@@ -169,7 +169,7 @@ docker compose up --build -d
 
 Docker Compose is the supported deployment for this repository. It runs one backend worker locally to avoid loading duplicate embedding models into memory. The root `Dockerfile` also runs the FastAPI service on the platform-provided `PORT` for container hosts such as Render.
 
-The primary answer-generation model is **Groq Cloud `openai/gpt-oss-20b`**. NeMo Guardrails is optional by configuration and, when enabled, uses a separate evaluator; it is not the primary generation model. The configured NeMo provider must have access to its model credentials. MFA and refresh-token flows are not exposed by the current API.
+The primary answer-generation model is **Groq Cloud `llama-3.3-70b-versatile`**. NeMo Guardrails is optional by configuration and, when enabled, uses a separate evaluator; it is not the primary generation model. The configured NeMo provider must have access to its model credentials. MFA and refresh-token flows are not exposed by the current API.
 
 ### External hosting & Cloud Deployment
 

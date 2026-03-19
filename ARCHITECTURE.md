@@ -312,7 +312,7 @@ not required at runtime.
 | Dimension | Current value |
 | :--- | :--- |
 | Dense embedding size | 384 dimensions (`BAAI/bge-small-en-v1.5`) |
-| Generation model | Groq Cloud `openai/gpt-oss-20b` |
+| Generation model | Groq Cloud `llama-3.3-70b-versatile` |
 | Default upload limit | 10 MiB |
 | Maximum corrective rewrites | 1 |
 | In-memory trace history | 500 traces |
@@ -321,7 +321,7 @@ not required at runtime.
 
 These are configuration and architecture values, not throughput guarantees. Latency and retrieval quality must be measured with the evaluation harness on the target hardware and provider configuration.
 
-The primary generation path uses Groq Cloud with `openai/gpt-oss-20b`. NeMo Guardrails is enabled in the active environment and has its own self-check evaluator configured separately as `gpt-4o-mini`; that evaluator is used for guardrail checks, not answer generation. The NeMo model provider must be configured independently.
+The primary generation path uses Groq Cloud with `llama-3.3-70b-versatile`. NeMo Guardrails is enabled in the active environment and has its own self-check evaluator configured separately as `gpt-4o-mini`; that evaluator is used for guardrail checks, not answer generation. The NeMo model provider must be configured independently.
 
 ### Evaluation approach
 

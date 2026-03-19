@@ -28,12 +28,18 @@ if not _raw_api_url:
 if not _raw_api_url:
     _raw_api_url = "http://localhost:8000/api/v1"
 
-# Ensure scheme is present for cloud deployments (e.g. Render / Custom domains)
 if not _raw_api_url.startswith(("http://", "https://")):
-    if any(local_host in _raw_api_url for local_host in ("localhost", "127.0.0.1", "backend")):
-        _raw_api_url = f"http://{_raw_api_url}"
-    else:
+    is_public_domain = (
+        ".onrender.com" in _raw_api_url
+        or bool(re.search(r"\.(com|io|net|org|app|dev|cloud|co|tech)(:\d+)?$", _raw_api_url, re.IGNORECASE))
+    )
+    if is_public_domain:
         _raw_api_url = f"https://{_raw_api_url}"
+    else:
+        if ":" not in _raw_api_url.split("/")[0]:
+            _raw_api_url = f"http://{_raw_api_url}:8000"
+        else:
+            _raw_api_url = f"http://{_raw_api_url}"
 
 if not _raw_api_url.endswith("/api/v1"):
     if _raw_api_url.endswith("/api"):
@@ -50,7 +56,7 @@ def api_endpoint(path: str) -> str:
     return f"{API_BASE_URL}/{clean_path}"
 
 
-REQUEST_TIMEOUT = httpx.Timeout(60.0, connect=5.0)
+REQUEST_TIMEOUT = httpx.Timeout(90.0, connect=10.0, read=90.0)
 
 
 @st.cache_data(ttl=15, show_spinner=False)

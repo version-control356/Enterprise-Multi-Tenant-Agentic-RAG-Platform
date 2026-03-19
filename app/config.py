@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     REQUIRE_REDIS: bool = False
 
     GROQ_API_KEY: str = ""
-    GROQ_MODEL: str = "openai/gpt-oss-20b"
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
     STRICT_RAG_MODE: bool = True
     USE_LLM_GRADER: bool = Field(default=False, description="Enable LLM-as-a-Judge relevance grading in LangGraph (set False for sub-second fast heuristic grading)")
     ENABLE_QUERY_REWRITE: bool = Field(default=False, description="Enable iterative query rewriting in LangGraph (set False for ultra-fast sub-500ms single-pass RAG)")

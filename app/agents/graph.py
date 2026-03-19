@@ -77,7 +77,6 @@ async def retrieve_node(state: AgentState) -> dict:
     if not user_query:
         return {"context": "", "is_relevant": False, "available_documents": []}
 
-    # Conversational greeting & courtesy fast path: skip heavy embedding computation and vector search
     user_query_clean = user_query.strip().lower()
     greetings_set = {"hi", "hello", "hey", "help", "who are you", "good morning", "good evening", "how are you", "thanks", "thank you"}
     if user_query_clean in greetings_set or (len(user_query_clean.split()) <= 2 and user_query_clean.startswith(("hi", "hello", "hey"))):
@@ -95,7 +94,6 @@ async def retrieve_node(state: AgentState) -> dict:
         list_tenant_documents(state["tenant_id"], user_role=state.get("user_role"))
     )
     async with telemetry_tracker.record_span(trace_id, "retrieve_hybrid", {"query": user_query[:50]}) as span_meta:
-        # Extract dense and sparse embeddings concurrently
         dense_embs, sparse_embs = await asyncio.gather(
             asyncio.to_thread(lambda: list(get_embedding_model().embed([user_query]))),
             asyncio.to_thread(lambda: list(get_sparse_embedding_model().embed([user_query]))),
@@ -125,7 +123,6 @@ async def retrieve_node(state: AgentState) -> dict:
 
         span_meta["retrieved_count"] = len(context_chunks)
 
-        # Apply Cohere Cross-Encoder Reranking if configured
         if settings.USE_COHERE_RERANK or bool(settings.COHERE_API_KEY.strip()):
             async with telemetry_tracker.record_span(trace_id, "rerank_cohere", {"candidate_count": len(context_chunks)}) as rerank_meta:
                 context_chunks = await rerank_documents_with_cohere(
@@ -160,7 +157,6 @@ async def grade_documents_node(state: AgentState) -> dict:
         if not settings.USE_LLM_GRADER:
             user_query = _extract_query(state).lower()
             query_tokens = [w for w in user_query.split() if len(w) > 3]
-            # Fast hybrid relevance: check for keyword or token presence in retrieved context
             has_overlap = any(token in context.lower() for token in query_tokens) if query_tokens else True
             span_meta["is_relevant"] = has_overlap
             span_meta["grader_type"] = "fast_heuristic_scorer"
@@ -243,7 +239,6 @@ async def generate_node(state: AgentState) -> dict:
         docs_list = state.get("available_documents", [])
         docs_summary = ", ".join(f"`{d}`" for d in docs_list) if docs_list else "No documents uploaded yet in this tenant."
 
-        # Bound context length to 3000 chars for rapid LLM prefill and inference
         raw_context = state.get("context", "No relevant context found.")
         bounded_context = raw_context[:3000] if len(raw_context) > 3000 else raw_context
 
@@ -281,7 +276,6 @@ async def generate_node(state: AgentState) -> dict:
                 f"Document Context:\n{bounded_context}"
             )
 
-        # Keep last 4 messages to preserve immediate context while bounding token usage
         recent_messages = state["messages"][-4:] if len(state["messages"]) > 4 else state["messages"]
         messages = [SystemMessage(content=system_prompt)] + recent_messages
         response = await llm.ainvoke(messages)
