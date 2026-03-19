@@ -122,8 +122,10 @@ async def retrieve_node(state: AgentState) -> dict:
                 context_chunks.append(f"--- Document Source: {fname} ---\n{text}")
 
         span_meta["retrieved_count"] = len(context_chunks)
+        top_score = scored_points[0].score if (scored_points and hasattr(scored_points[0], "score")) else 0.0
 
-        if settings.USE_COHERE_RERANK or bool(settings.COHERE_API_KEY.strip()):
+        should_rerank = (settings.USE_COHERE_RERANK or bool(settings.COHERE_API_KEY.strip())) and (top_score < 0.85)
+        if should_rerank and context_chunks:
             async with telemetry_tracker.record_span(trace_id, "rerank_cohere", {"candidate_count": len(context_chunks)}) as rerank_meta:
                 context_chunks = await rerank_documents_with_cohere(
                     query=user_query,
@@ -131,6 +133,8 @@ async def retrieve_node(state: AgentState) -> dict:
                     top_n=settings.COHERE_TOP_N,
                 )
                 rerank_meta["reranked_count"] = len(context_chunks)
+        elif top_score >= 0.85:
+            span_meta["rerank_bypassed"] = True
 
         retrieved_context = "\n\n".join(context_chunks)
         if settings.REDACT_DOCUMENT_PII:

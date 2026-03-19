@@ -745,8 +745,19 @@ async def chat_stream(
     start_time = time.perf_counter()
     telemetry_tracker.start_trace(request_id)
 
+    sanitization_task = asyncio.create_task(SecurityGuardrails.sanitize_prompt_async(query))
+    rate_limit_task = asyncio.create_task(
+        is_rate_limit_exceeded(
+            f"rate:chat:{current_user.tenant_id}:{current_user.user_id}",
+            settings.CHAT_RATE_LIMIT_PER_MINUTE,
+        )
+    )
+    cache_version_task = asyncio.create_task(get_tenant_cache_version(current_user.tenant_id))
+
     try:
-        sanitized_query = await SecurityGuardrails.sanitize_prompt_async(query)
+        sanitized_query, rate_limited, tenant_cache_version = await asyncio.gather(
+            sanitization_task, rate_limit_task, cache_version_task
+        )
     except ValueError as e:
         telemetry_tracker.finalize_trace(
             trace_id=request_id,
@@ -762,17 +773,12 @@ async def chat_stream(
             detail=str(e)
         )
 
-    if await is_rate_limit_exceeded(
-        f"rate:chat:{current_user.tenant_id}:{current_user.user_id}",
-        settings.CHAT_RATE_LIMIT_PER_MINUTE,
-    ):
+    if rate_limited:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Chat rate limit exceeded. Please retry shortly.",
             headers={"Retry-After": "60"},
         )
-
-    tenant_cache_version = await get_tenant_cache_version(current_user.tenant_id)
     cache_key = build_chat_cache_key(
         tenant_id=current_user.tenant_id,
         user_id=current_user.user_id,
