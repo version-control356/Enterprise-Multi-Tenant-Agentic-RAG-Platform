@@ -856,23 +856,24 @@ async def chat_stream(
                                 break
 
                             for fragment in visible_fragments:
-                                sanitized_token = await SecurityGuardrails.sanitize_output_async(fragment)
+                                sanitized_token = SecurityGuardrails.redact_pii_fast(fragment)
                                 if sanitized_token:
                                     full_response += sanitized_token
                                     yield f"data: {json.dumps({'content': sanitized_token, 'trace_id': request_id})}\n\n"
 
                 if not inside_think and think_buffer:
-                    sanitized_token = await SecurityGuardrails.sanitize_output_async(think_buffer)
+                    sanitized_token = SecurityGuardrails.redact_pii_fast(think_buffer)
                     if sanitized_token:
                         full_response += sanitized_token
                         yield f"data: {json.dumps({'content': sanitized_token, 'trace_id': request_id})}\n\n"
 
             if full_response:
-                await set_cached_response(cache_key, {"response": full_response})
+                final_sanitized = await SecurityGuardrails.sanitize_output_async(full_response)
+                await set_cached_response(cache_key, {"response": final_sanitized})
         except Exception as error:
             error_encountered = str(error)
             logger.exception("Chat stream execution failed: %s", error)
-            error_msg = "Generation failed. Please retry the request."
+            error_msg = f"Generation error: {error}" if settings.ENVIRONMENT != "production" else "Generation failed. Please verify API configuration and retry."
             yield f"data: {json.dumps({'content': error_msg, 'trace_id': request_id})}\n\n"
         finally:
             telemetry_tracker.finalize_trace(

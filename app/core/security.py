@@ -123,10 +123,8 @@ class SecurityGuardrails:
                 raise ValueError("Security Policy Violation: Malicious prompt pattern detected.")
 
     @staticmethod
-    def redact_pii(text: str) -> str:
-        """Redacts sensitive PII and credential patterns from text and response streams."""
-        if settings.PII_PROVIDER == "presidio":
-            return SecurityGuardrails._redact_with_presidio(text)
+    def redact_pii_fast(text: str) -> str:
+        """Lightweight regex-based redaction for low-latency streaming chunk delivery."""
         redacted = re.sub(EMAIL_REGEX, "[REDACTED_EMAIL]", text)
         redacted = re.sub(PHONE_REGEX, "[REDACTED_PHONE]", redacted)
         redacted = re.sub(SSN_REGEX, "[REDACTED_SSN]", redacted)
@@ -134,6 +132,13 @@ class SecurityGuardrails:
         redacted = re.sub(JWT_REGEX, "[REDACTED_JWT]", redacted)
         redacted = re.sub(API_KEY_REGEX, "[REDACTED_SECRET]", redacted)
         return redacted
+
+    @staticmethod
+    def redact_pii(text: str) -> str:
+        """Redacts sensitive PII and credential patterns from text and response streams."""
+        if settings.PII_PROVIDER == "presidio":
+            return SecurityGuardrails._redact_with_presidio(text)
+        return SecurityGuardrails.redact_pii_fast(text)
 
     @classmethod
     def sanitize_prompt(cls, prompt: str) -> str:

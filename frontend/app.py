@@ -30,7 +30,10 @@ if not _raw_api_url:
 
 # Ensure scheme is present for cloud deployments (e.g. Render / Custom domains)
 if not _raw_api_url.startswith(("http://", "https://")):
-    _raw_api_url = f"https://{_raw_api_url}"
+    if any(local_host in _raw_api_url for local_host in ("localhost", "127.0.0.1", "backend")):
+        _raw_api_url = f"http://{_raw_api_url}"
+    else:
+        _raw_api_url = f"https://{_raw_api_url}"
 
 if not _raw_api_url.endswith("/api/v1"):
     if _raw_api_url.endswith("/api"):
@@ -56,7 +59,7 @@ def check_backend_connection() -> tuple[bool, str, float]:
     t0 = time.perf_counter()
     try:
         health_url = API_BASE_URL.replace("/api/v1", "/health")
-        resp = httpx.get(health_url, timeout=httpx.Timeout(4.0, connect=2.0))
+        resp = httpx.get(health_url, timeout=httpx.Timeout(4.0, connect=2.0), follow_redirects=True)
         latency = round((time.perf_counter() - t0) * 1000, 1)
         if resp.is_success:
             return True, "Online", latency

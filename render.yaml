@@ -41,13 +41,25 @@ services:
         sync: false
       - key: CORS_ORIGINS
         sync: false
+      - key: BOOTSTRAP_ADMIN_USERNAME
+        value: admin_user
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: BOOTSTRAP_ADMIN_TENANT_ID
+        value: tenant_alpha
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+      - key: LANGFUSE_HOST
+        value: https://cloud.langfuse.com
 
   - type: web
     name: enterprise-rag-frontend
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerCommand: streamlit run frontend/app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    dockerCommand: streamlit run frontend/app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false
     healthCheckPath: /_stcore/health
     autoDeploy: true
     envVars:
