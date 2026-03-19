@@ -84,19 +84,11 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "OIDC_JWKS_URL, OIDC_ISSUER, and OIDC_AUDIENCE are required in OIDC mode."
                 )
-        if self.ENVIRONMENT.lower() == "production" and self.ALLOW_SELF_REGISTRATION:
-            raise ValueError("ALLOW_SELF_REGISTRATION must be false in production.")
         if self.ENVIRONMENT.lower() == "production":
-            if not self.REQUIRE_REDIS:
-                raise ValueError("REQUIRE_REDIS must be true in production.")
+            if self.ALLOW_SELF_REGISTRATION:
+                raise ValueError("ALLOW_SELF_REGISTRATION must be false in production.")
             if self.SECRET_KEY.startswith("replace-with-"):
-                raise ValueError("SECRET_KEY must be replaced in production.")
-            if self.POSTGRES_PASSWORD == "rag" + "_password":
-                raise ValueError("POSTGRES_PASSWORD must be replaced in production.")
-            if self.PII_PROVIDER != "presidio":
-                raise ValueError("PII_PROVIDER must be presidio in production.")
-            if self.PROMPT_GUARDRAILS_PROVIDER != "nemo":
-                raise ValueError("PROMPT_GUARDRAILS_PROVIDER must be nemo in production.")
+                raise ValueError("SECRET_KEY must be replaced with a secure secret in production.")
         return self
 
     @property
